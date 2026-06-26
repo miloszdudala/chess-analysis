@@ -6,39 +6,43 @@
 <title>Chess Analyzer</title>
 <link rel="stylesheet" href="/style.css">
 <style>
-  /* App chrome (widget styles come from /style.css) */
   body { padding-top: 0; }
-  header.app { position: sticky; top: 0; z-index: 5; background: #161512ee;
-    backdrop-filter: blur(8px); border-bottom: 1px solid #ffffff14;
-    padding: 1rem; margin-bottom: 1.5rem; }
-  .appbar { max-width: 920px; margin: 0 auto; display: flex; align-items: center;
-    gap: 1rem; flex-wrap: wrap; }
-  .brand { font-size: 1.2rem; font-weight: 700; }
-  .tabs { display: flex; gap: .4rem; }
-  .tab { background: #262421; color: var(--mut); border: 1px solid transparent;
-    border-radius: 8px; padding: .4rem .9rem; cursor: pointer; font: inherit;
-    text-transform: capitalize; }
-  .tab:hover { color: var(--txt); }
-  .tab.active { background: var(--accent); color: #08120a; font-weight: 600; }
-  .controls { max-width: 920px; margin: 0 auto 1rem; display: flex; gap: .6rem;
+  header.app { position: sticky; top: 0; z-index: 5; background: #fbfaf7e6;
+    backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); padding: .9rem 1.1rem; }
+  .appbar { max-width: 960px; margin: 0 auto; display: flex; align-items: center;
+    gap: 1.5rem; flex-wrap: wrap; }
+  .brand { font-size: 1.05rem; font-weight: 600; letter-spacing: -.01em; }
+  .tabs { display: flex; gap: 1.1rem; }
+  .tab { background: none; border: 0; color: var(--mut); cursor: pointer; font: inherit;
+    padding: .2rem 0; border-bottom: 2px solid transparent; }
+  .tab:hover { color: var(--ink); }
+  .tab.active { color: var(--ink); border-bottom-color: var(--accent); }
+  .controls { max-width: 960px; margin: 1.3rem auto .4rem; display: flex; gap: .7rem;
     align-items: end; flex-wrap: wrap; }
-  .field { display: flex; flex-direction: column; gap: .25rem; }
-  .field label { font-size: .72rem; text-transform: uppercase; letter-spacing: .04em;
+  .field { display: flex; flex-direction: column; gap: .3rem; }
+  .field label { font-size: .68rem; text-transform: uppercase; letter-spacing: .08em;
     color: var(--mut); }
-  .field input, .field select { background: #262421; color: var(--txt);
-    border: 1px solid #ffffff1f; border-radius: 8px; padding: .5rem .6rem;
-    font: inherit; min-width: 12rem; }
-  .field select { min-width: 22rem; }
-  button.go { background: var(--accent); color: #08120a; border: 0; font-weight: 600;
-    border-radius: 8px; padding: .55rem 1.2rem; cursor: pointer; font: inherit; }
+  .field input, .field select { background: var(--panel); color: var(--ink);
+    border: 1px solid var(--line); border-radius: 8px; padding: .5rem .6rem; font: inherit; }
+  .field input { min-width: 11rem; } .field select.wide { min-width: 22rem; }
+  button.go { background: var(--accent); color: #fff; border: 0; font-weight: 600;
+    border-radius: 8px; padding: .58rem 1.2rem; cursor: pointer; font: inherit; }
   button.go:disabled { opacity: .5; cursor: default; }
-  .status { max-width: 920px; margin: 0 auto; color: var(--mut); min-height: 1.2rem; }
-  .status.err { color: var(--l); }
-  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid #ffffff33;
+  .chips { max-width: 960px; margin: .3rem auto; display: flex; gap: .4rem; flex-wrap: wrap;
+    align-items: center; }
+  .chips .lead { font-size: .68rem; text-transform: uppercase; letter-spacing: .08em;
+    color: var(--mut); margin-right: .2rem; }
+  .chip { background: var(--panel); border: 1px solid var(--line); color: var(--mut);
+    border-radius: 999px; padding: .25rem .7rem; cursor: pointer; font-size: .82rem; }
+  .chip.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .status { max-width: 960px; margin: .4rem auto; color: var(--mut); min-height: 1.1rem;
+    font-size: .85rem; }
+  .status.err { color: var(--loss); }
+  .spinner { display: inline-block; width: 13px; height: 13px; border: 2px solid var(--line);
     border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite;
     vertical-align: -2px; margin-right: .5rem; }
   @keyframes spin { to { transform: rotate(360deg); } }
-  #result h1 { font-size: 1.5rem; margin: .5rem 0 .2rem; }
+  #result h1 { margin: .6rem 0 .15rem; }
 </style>
 </head>
 <body>
@@ -50,11 +54,10 @@
 </header>
 
 <div class="controls" id="controls"></div>
+<div class="chips" id="chips"></div>
 <div class="status" id="status"></div>
 
-<div class="wrap">
-  <div id="result"></div>
-</div>
+<div class="wrap"><div id="result"></div></div>
 
 <script src="/app.js"></script>
 </body>

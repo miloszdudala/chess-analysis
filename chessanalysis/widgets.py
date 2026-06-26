@@ -53,6 +53,21 @@ def board(fen: str, caption: str = "", lastmove: str | None = None,
             "lastmove": lastmove, "svg": svg}
 
 
+def ranking(title: str, rows: list[dict]) -> dict:
+    """A ranked list. rows: [{"label":.., "value":.., "sub":?}] (pre-sorted)."""
+    return {"type": "ranking", "title": title, "rows": rows}
+
+
+def movetree(children: list[dict]) -> dict:
+    """An expandable opening tree.
+
+    children: list of nodes, each
+        {"move":san, "count":n, "w":n,"d":n,"l":n, "mine":bool, "children":[...]}
+    sorted by count. `mine` flags moves the analysed player made (vs opponent's).
+    """
+    return {"type": "movetree", "children": children}
+
+
 def group(title: str, widgets: list[dict], layout: str = "row") -> dict:
     """A container that lays out child widgets in a row or grid."""
     return {"type": "group", "title": title, "layout": layout, "widgets": widgets}

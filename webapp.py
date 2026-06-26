@@ -88,9 +88,11 @@ def api_games():
 @api
 def api_player():
     user = request.args.get("user") or config.get("CHESS_USERNAME")
+    fmt = request.args.get("format") or None
     if not user:
         return jsonify({"error": "No username. Set CHESS_USERNAME in .env."}), 400
-    return jsonify(payload(modes.get("player")(user, games_dir=GAMES_DIR)))
+    doc = modes.get("player")(user, games_dir=GAMES_DIR, time_class=fmt)
+    return jsonify(doc.to_dict())   # JSON widgets -> rendered client-side
 
 
 @app.get("/api/game")

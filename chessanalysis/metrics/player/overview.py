@@ -1,11 +1,11 @@
-"""Headline cards + rating trend."""
+"""Headline cards + rating trend (with per-point date for the chart tooltip)."""
 from ...registry import metric
 from ... import widgets as W
 from ...util import WDL
 
 
-@metric("player", title=None, order=10)
-def overview(ctx):
+@metric("player", title="Summary", order=10)
+def summary(ctx):
     rec = WDL()
     for g in ctx.games:
         rec.add(g.outcome)
@@ -21,9 +21,10 @@ def overview(ctx):
     ])
 
 
-@metric("player", title="Rating trend", order=15)
+@metric("player", title="Rating", order=15)
 def rating_trend(ctx):
-    elos = [g.user_elo for g in ctx.games if g.user_elo]
-    if len(elos) < 2:
+    pts = [{"x": g.date, "y": g.user_elo}
+           for g in ctx.games if g.user_elo]
+    if len(pts) < 2:
         return None
-    return W.line([{"name": ctx.player, "points": elos}], y_label="Elo")
+    return W.line([{"name": ctx.player, "points": pts}], y_label="Elo")

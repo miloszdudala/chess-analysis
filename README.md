@@ -9,7 +9,7 @@ new modes, and new charts each drop in as a single file.
 
 ```bash
 python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt        # python-chess
+.venv/bin/pip install -r requirements.txt        # python-chess, flask
 brew install stockfish                            # engine for game review
 
 cp .env.example .env                              # then set CHESS_USERNAME
@@ -18,29 +18,48 @@ cp .env.example .env                              # then set CHESS_USERNAME
 `.env` (gitignored) holds `CHESS_USERNAME`, `GAMES_DIR`, `REPORT_FILE`,
 `STOCKFISH_PATH`, `ENGINE_DEPTH`.
 
-## Usage
+## Run the web app
 
 ```bash
-# Download your games (public Chess.com API, no key needed)
+# 1. Download your games (public Chess.com API, no key needed)
 python3 scraper.py
 
-# Reports (run under the venv so python-chess/Stockfish are available)
-.venv/bin/python analyze.py                       # player report (default)
+# 2. Start the app, then open http://127.0.0.1:5050
+.venv/bin/python webapp.py
+```
+
+In the browser, pick a tab:
+
+- **Player report** — choose a format (bullet / blitz / rapid) first, then pick
+  which stats to show. Includes a zoomable rating chart (drag or scroll to zoom,
+  double-click to reset, hover for date / rating / change) and opponent rankings
+  for the games you win, lose, and draw.
+- **Game review** — pick a game and depth; Stockfish reports accuracy, an eval
+  graph, and annotated key moments.
+- **Compare** — two players side by side.
+
+## CLI (static HTML + JSON)
+
+The same reports can be generated as static files without the server:
+
+```bash
+.venv/bin/python analyze.py                       # player report (all formats)
 .venv/bin/python analyze.py game last             # engine review, most recent game
 .venv/bin/python analyze.py game mainc4tur        # last game vs an opponent
-.venv/bin/python analyze.py game 170739219564     # by Chess.com game id
 .venv/bin/python analyze.py compare me rival      # two players side by side
 ```
 
-Each run writes both `<name>.html` and `<name>.json`. The JSON is the same
-Document — it's the contract a future JS frontend would consume for richer
-plots. Engine analysis is cached to `data/cache/`, so re-runs are instant.
+Each run writes both `<name>.html` and `<name>.json` (the same Document the web
+app consumes). Engine analysis is cached to `data/cache/`, so re-runs are instant.
 
 ## Architecture
 
 ```
 scraper.py                 Chess.com scraper (username only)
 analyze.py                 CLI: pick a mode → build a Document → write HTML + JSON
+webapp.py                  Flask app: serves the same Documents over /api/<mode>
+frontend/                  index.html + app.js: mode picker, JS widget renderer,
+                           interactive rating chart
 chessanalysis/
 ├── model.py               PGN → perspective-bound Game objects (+ parsed moves, clocks)
 ├── contexts.py            per-mode input shapes (Player / Game / Compare)

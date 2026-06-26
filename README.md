@@ -1,58 +1,97 @@
 # chess-analyzer
 
-A small, zero-dependency toolkit to scrape your Chess.com games and generate an
-HTML stats report. Built around a **plugin architecture** — adding a new stat is
-just dropping one file into `chessanalysis/stats/`.
+Scrape your Chess.com games and generate analysis reports — a full
+game-history overview, a deep **engine review** of a single game (Stockfish),
+and player **comparison**. Built around a pluggable architecture: new stats,
+new modes, and new charts each drop in as a single file.
 
-## Usage
+## Setup
 
 ```bash
-# 0. Set your handle once (gitignored, never committed)
-cp .env.example .env        # then edit CHESS_USERNAME
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt        # python-chess, flask
+brew install stockfish                            # engine for game review
 
-# 1. Download your games (uses the public Chess.com API, no key needed)
-python3 scraper.py          # reads CHESS_USERNAME from .env
-
-# Optional: limit to a year / month, or pass a handle explicitly
-python3 scraper.py someone_else --year 2026 --month 6
-
-# 2. Build the HTML report
-python3 analyze.py
-open report.html
+cp .env.example .env                              # then set CHESS_USERNAME
 ```
 
-Config lives in `.env` (`CHESS_USERNAME`, `GAMES_DIR`, `REPORT_FILE`); see
-`.env.example`. Any value can be overridden inline, e.g.
-`CHESS_USERNAME=foo python3 analyze.py`. Games are saved to `games/` and the
-report to `report.html` — both are gitignored, so no personal data is committed.
+`.env` (gitignored) holds `CHESS_USERNAME`, `GAMES_DIR`, `REPORT_FILE`,
+`STOCKFISH_PATH`, `ENGINE_DEPTH`.
+
+## Run the web app
+
+```bash
+# 1. Download your games (public Chess.com API, no key needed)
+python3 scraper.py
+
+# 2. Start the app, then open http://127.0.0.1:5050
+.venv/bin/python webapp.py
+```
+
+In the browser, pick a tab:
+
+- **Player report** — choose a format (bullet / blitz / rapid) first, then pick
+  which stats to show. Includes a zoomable rating chart (drag or scroll to zoom,
+  double-click to reset, hover for date / rating / change) and opponent rankings
+  for the games you win, lose, and draw.
+- **Game review** — pick a game and depth; Stockfish reports accuracy, an eval
+  graph, and annotated key moments.
+- **Compare** — two players side by side.
+
+## CLI (static HTML + JSON)
+
+The same reports can be generated as static files without the server:
+
+```bash
+.venv/bin/python analyze.py                       # player report (all formats)
+.venv/bin/python analyze.py game last             # engine review, most recent game
+.venv/bin/python analyze.py game mainc4tur        # last game vs an opponent
+.venv/bin/python analyze.py compare me rival      # two players side by side
+```
+
+Each run writes both `<name>.html` and `<name>.json` (the same Document the web
+app consumes). Engine analysis is cached to `data/cache/`, so re-runs are instant.
 
 ## Architecture
 
 ```
-scraper.py                 # Chess.com scraper (username only)
-analyze.py                 # driver: load games → run all stats → write HTML
+scraper.py                 Chess.com scraper (username only)
+analyze.py                 CLI: pick a mode → build a Document → write HTML + JSON
+webapp.py                  Flask app: serves the same Documents over /api/<mode>
+frontend/                  index.html + app.js: mode picker, JS widget renderer,
+                           interactive rating chart
 chessanalysis/
-├── model.py               # PGN → perspective-bound Game objects (+ parsed moves, clocks, annotations)
-├── registry.py            # @register decorator
-├── util.py                # tally() + WDL aggregation helpers
-├── render.py              # HTML widgets (cards, tables, bars, sparklines) + page shell
-└── stats/                 # one file per stat, auto-discovered at import
+├── model.py               PGN → perspective-bound Game objects (+ parsed moves, clocks)
+├── contexts.py            per-mode input shapes (Player / Game / Compare)
+├── enrich/engine.py       Stockfish per-move evals, accuracy, blunder detection (cached)
+├── registry.py            @metric decorator; metrics tagged by scope
+├── metrics/               compute-only units → widget data (auto-discovered)
+│   ├── player/  game/  compare/
+├── widgets.py             widget vocabulary = backend↔frontend data contract
+├── document.py            a mode's output: ordered widgets + metadata → JSON
+├── modes/                 build context → run scope's metrics → assemble Document
+└── render_html.py         default renderer: Document → static HTML (incl. SVG)
 ```
 
-## Adding a stat
+## Three ways to extend — each is one file
 
-Drop a file in `chessanalysis/stats/`. It self-registers — no wiring needed:
+**A new stat** — drop a file in `metrics/<scope>/`:
 
 ```python
-from ..registry import register
-from ..render import wdl_table
-from ..util import tally
+from ...registry import metric
+from ... import widgets as W
+from ...util import tally, wdl_rows
 
-@register("By time control", order=30)
-def by_time_control(games):
-    return wdl_table("Format", tally(games, lambda g: g.time_class))
+@metric("player", title="By time control", order=30)
+def by_time_control(ctx):
+    return W.wdl_table("Format", wdl_rows(tally(ctx.games, lambda g: g.time_class)))
 ```
 
-Each `Game` is bound to the analysed player, so `g.color`, `g.outcome`,
-`g.user_elo`, `g.opponent`, and `g.my_moves` (with clocks and annotations) are
-ready to use. `order=` controls placement in the report.
+**A new mode** — add a `modes/` file with `@mode("name")` and a context type;
+it reuses every metric of that scope.
+
+**A new chart** — add a builder to `widgets.py` and a handler in
+`render_html.py` (and, later, a frontend component).
+
+The discipline that keeps it easy: **metrics compute, modes shape data,
+renderers render** — never the other way around.

@@ -2,8 +2,10 @@
 games/
 *.pgn
 
-# Generated report
+# Generated reports & analysis output
 report.html
+out/
+data/cache/
 
 # Python
 __pycache__/

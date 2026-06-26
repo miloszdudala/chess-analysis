@@ -40,3 +40,14 @@ def tally(games: Iterable[Game], key: Callable[[Game], object]) -> dict:
             continue
         out.setdefault(k, WDL()).add(g.outcome)
     return out
+
+
+def wdl_rows(groups: dict, sort: bool = True, limit: int | None = None) -> list[dict]:
+    """Convert a {label: WDL} dict into rows for widgets.wdl_table."""
+    items = list(groups.items())
+    if sort:
+        items.sort(key=lambda kv: -kv[1].total)
+    if limit:
+        items = items[:limit]
+    return [{"label": k, "win": v.win, "draw": v.draw, "loss": v.loss}
+            for k, v in items]

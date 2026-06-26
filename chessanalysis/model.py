@@ -43,6 +43,7 @@ class Move:
 class Game:
     headers: dict
     moves: list[Move] = field(default_factory=list)
+    pgn: str = ""            # raw PGN text (for engine replay via python-chess)
 
     # --- perspective (filled by bind()) ---
     user: str = ""
@@ -174,11 +175,16 @@ def parse_pgn_file(path: str) -> list[Game]:
     games: list[Game] = []
     headers: dict = {}
     movetext: list[str] = []
+    raw: list[str] = []
     in_moves = False
 
     def flush():
         if headers:
-            games.append(Game(headers=dict(headers), moves=_parse_moves(" ".join(movetext))))
+            games.append(Game(
+                headers=dict(headers),
+                moves=_parse_moves(" ".join(movetext)),
+                pgn="\n".join(raw),
+            ))
 
     with open(path, encoding="utf-8", errors="replace") as f:
         for line in f:
@@ -186,7 +192,7 @@ def parse_pgn_file(path: str) -> list[Game]:
             if tag:
                 if in_moves:        # a new game's headers begin
                     flush()
-                    headers, movetext, in_moves = {}, [], False
+                    headers, movetext, raw, in_moves = {}, [], [], False
                 headers[tag.group(1)] = tag.group(2)
             elif line.strip() == "":
                 if headers and not in_moves:
@@ -194,6 +200,7 @@ def parse_pgn_file(path: str) -> list[Game]:
             else:
                 in_moves = True
                 movetext.append(line.strip())
+            raw.append(line.rstrip("\n"))
     flush()
     return games
 

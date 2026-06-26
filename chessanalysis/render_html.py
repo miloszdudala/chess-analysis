@@ -195,11 +195,46 @@ def _barstack(w) -> str:
             f'background:{pal.get(s["name"], "#ccc")}" title="{esc(s["name"])}: {s["value"]}">'
             f'{s["value"] if 100 * s["value"] / total > 7 else ""}</span>'
             for s in r["segments"] if s["value"] > 0)
+        note = f'<span class="bs-note">{esc(r["note"])}</span>' if r.get("note") else ""
         rows.append(f'<div class="bs-row"><span class="bs-label">{esc(r["label"])}</span>'
-                    f'<span class="bs-bar">{segs}</span></div>')
+                    f'<span class="bs-bar">{segs}</span>{note}</div>')
     title = f'<div class="bs-title">{esc(w["title"])}</div>' if w.get("title") else ""
     return (f'<div class="barstack">{title}{"".join(rows)}'
             f'<div class="bs-legend">{legend}</div></div>')
+
+
+def _donut(w) -> str:
+    segs = [s for s in w["segments"] if s["value"] > 0]
+    total = sum(s["value"] for s in segs) or 1
+    circles, cumulative = [], 0.0
+    for s in segs:
+        length = 100 * s["value"] / total
+        circles.append(
+            f'<circle class="dn-seg" cx="21" cy="21" r="15.915" fill="none" '
+            f'stroke="{s["color"]}" stroke-width="5" '
+            f'stroke-dasharray="{length:.2f} {100 - length:.2f}" '
+            f'stroke-dashoffset="{25 - cumulative:.2f}">'
+            f'<title>{esc(s["name"])}: {s["value"]}</title></circle>')
+        cumulative += length
+    center = (f'<text class="dn-c" x="21" y="20.5">{esc(w["center"])}</text>'
+              if w.get("center") else "")
+    sub = (f'<text class="dn-s" x="21" y="25.5">{esc(w["sub"])}</text>'
+           if w.get("sub") else "")
+    legend = "".join(
+        f'<span class="bs-leg"><i style="background:{s["color"]}"></i>'
+        f'{esc(s["name"])} {s["value"]}</span>' for s in segs)
+    return (f'<div class="donut"><svg viewBox="0 0 42 42" class="dn-svg">'
+            f'{"".join(circles)}{center}{sub}</svg>'
+            f'<div class="bs-legend">{legend}</div></div>')
+
+
+def _timeline(w) -> str:
+    col = {"win": "var(--win)", "draw": "var(--draw)", "loss": "var(--loss)"}
+    cells = "".join(
+        f'<span class="tl-cell" style="background:{col.get(it["outcome"], "#ccc")}" '
+        f'title="{esc(it.get("label", ""))}"></span>' for it in w["items"])
+    title = f'<div class="bs-title">{esc(w["title"])}</div>' if w.get("title") else ""
+    return f'<div class="timeline">{title}<div class="tl-row">{cells}</div></div>'
 
 
 _HANDLERS = {
@@ -207,6 +242,7 @@ _HANDLERS = {
     "eval": _eval, "board": _board, "group": _group, "ranking": _ranking,
     "movetree": _movetree, "recent": _recent, "conversion": _conversion,
     "text": _text, "review": _review, "barstack": _barstack,
+    "donut": _donut, "timeline": _timeline,
 }
 
 
@@ -328,16 +364,32 @@ _CSS = """
   .barstack { background:var(--panel); border:1px solid var(--line); border-radius:12px;
               padding:.85rem 1rem; }
   .bs-title { font-size:.8rem; color:var(--mut); margin-bottom:.5rem; }
-  .bs-row { display:flex; align-items:center; gap:.7rem; margin:.35rem 0; }
-  .bs-label { width:3.4rem; font-size:.82rem; color:var(--mut); flex:0 0 auto; }
+  .bs-row { display:flex; align-items:center; gap:.7rem; margin:.4rem 0; }
+  .bs-label { flex:0 0 7.5rem; font-size:.8rem; line-height:1.15; color:var(--ink); }
   .bs-bar { flex:1; display:flex; height:22px; border-radius:5px; overflow:hidden;
             background:var(--line); }
   .bs-seg { display:flex; align-items:center; justify-content:center; color:#fff;
             font:600 .72rem var(--mono); min-width:0; transition:width .2s; }
+  .bs-note { flex:0 0 auto; font:600 .76rem var(--mono); color:var(--mut);
+             min-width:4.2rem; text-align:right; font-variant-numeric:tabular-nums; }
   .bs-legend { display:flex; flex-wrap:wrap; gap:.3rem .9rem; margin-top:.65rem; }
   .bs-leg { display:inline-flex; align-items:center; gap:.35rem; font-size:.72rem;
             color:var(--mut); text-transform:capitalize; }
   .bs-leg i { width:10px; height:10px; border-radius:2px; }
+  /* donut (ring) chart */
+  .donut { background:var(--panel); border:1px solid var(--line); border-radius:12px;
+           padding:.9rem 1rem; display:flex; flex-direction:column; align-items:center; }
+  .dn-svg { width:150px; height:150px; transform:rotate(-90deg); }
+  .dn-seg { transition:stroke-dasharray .3s; }
+  .dn-c { transform:rotate(90deg); transform-origin:21px 21px; text-anchor:middle;
+          fill:var(--ink); font:600 7px var(--mono); }
+  .dn-s { transform:rotate(90deg); transform-origin:21px 21px; text-anchor:middle;
+          fill:var(--mut); font:2.6px ui-sans-serif,system-ui,sans-serif; }
+  /* results timeline strip */
+  .timeline { background:var(--panel); border:1px solid var(--line); border-radius:12px;
+              padding:.85rem 1rem; }
+  .tl-row { display:flex; flex-wrap:wrap; gap:3px; }
+  .tl-cell { width:14px; height:14px; border-radius:3px; }
   /* interactive review board (web app) */
   .rv { display:flex; gap:1rem; flex-wrap:wrap; align-items:flex-start; }
   .rv-main { display:flex; flex-direction:column; gap:.45rem;

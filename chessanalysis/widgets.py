@@ -49,10 +49,49 @@ def evalbar(plies: list[dict], moves: list[str]) -> dict:
 def barstack(rows: list[dict], palette: dict, title: str = "") -> dict:
     """Horizontal stacked-bar chart (one bar per row) with a shared legend.
 
-    rows:    [{"label":.., "segments":[{"name":.., "value":n}]}]
+    rows:    [{"label":.., "segments":[{"name":.., "value":n}], "note":?}]
+             an optional `note` is shown right-aligned after the bar.
     palette: {segment_name: css_color} — also fixes legend order.
     """
     return {"type": "barstack", "rows": rows, "palette": palette, "title": title}
+
+
+# shared win/draw/loss colours (match the --win/--draw/--loss CSS variables)
+WDL_PALETTE = {"win": "#3f7d5a", "draw": "#cbc3b2", "loss": "#c1573f"}
+
+
+def wdl_barstack(rows: list[dict], title: str = "") -> dict:
+    """W/D/L stacked bars — the visual form of a wdl_table.
+
+    rows: [{"label":.., "win":n, "draw":n, "loss":n}] (same shape wdl_table takes).
+    Each bar is annotated with its win-rate and game count.
+    """
+    bs_rows = []
+    for r in rows:
+        total = r["win"] + r["draw"] + r["loss"]
+        wr = f"{round(100 * r['win'] / total)}%" if total else "—"
+        bs_rows.append({
+            "label": r["label"],
+            "segments": [{"name": "win", "value": r["win"]},
+                         {"name": "draw", "value": r["draw"]},
+                         {"name": "loss", "value": r["loss"]}],
+            "note": f"{wr} · {total}g",
+        })
+    return {"type": "barstack", "rows": bs_rows, "palette": WDL_PALETTE, "title": title}
+
+
+def donut(segments: list[dict], center: str = "", sub: str = "") -> dict:
+    """A ring chart. segments: [{"name":.., "value":n, "color":css}]; `center`
+    and `sub` are the big/small labels drawn in the hole."""
+    return {"type": "donut", "segments": segments, "center": center, "sub": sub}
+
+
+def timeline(items: list[dict], title: str = "") -> dict:
+    """A chronological strip of result cells (oldest → newest).
+
+    items: [{"outcome":"win"|"draw"|"loss", "label":?}] — `label` is the tooltip.
+    """
+    return {"type": "timeline", "items": items, "title": title}
 
 
 def board(fen: str, caption: str = "", lastmove: str | None = None,

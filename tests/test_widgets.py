@@ -28,6 +28,25 @@ def test_board_widget_optional_svg():
     assert w["caption"] == "cap" and w["lastmove"] == "e2e4"
 
 
+def test_wdl_barstack_shape_and_note():
+    w = W.wdl_barstack([{"label": "White", "win": 6, "draw": 2, "loss": 2}])
+    assert w["type"] == "barstack" and w["palette"] == W.WDL_PALETTE
+    row = w["rows"][0]
+    assert {s["name"]: s["value"] for s in row["segments"]} == {"win": 6, "draw": 2, "loss": 2}
+    assert row["note"] == "60% · 10g"            # 6/10 wins over 10 games
+
+
+def test_donut_widget():
+    w = W.donut([{"name": "win", "value": 3, "color": "#0a0"}], center="60%", sub="win rate")
+    assert w["type"] == "donut" and w["center"] == "60%"
+    assert w["segments"][0]["color"] == "#0a0"
+
+
+def test_timeline_widget():
+    w = W.timeline([{"outcome": "win", "label": "x"}, {"outcome": "loss"}], title="Form")
+    assert w["type"] == "timeline" and len(w["items"]) == 2
+
+
 def test_cards_and_table():
     cards = W.cards([W.card("99%", "Accuracy", sub="white")])
     assert cards["type"] == "cards"

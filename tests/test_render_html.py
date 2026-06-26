@@ -27,6 +27,17 @@ def test_barstack_handler():
     assert "barstack" in html and "bs-seg" in html and "bs-leg" in html
 
 
+def test_donut_and_timeline_handlers():
+    dn = R.render_widget({"type": "donut", "center": "60%", "sub": "win rate",
+                          "segments": [{"name": "win", "value": 6, "color": "#3f7d5a"},
+                                       {"name": "loss", "value": 4, "color": "#c1573f"}]})
+    assert "donut" in dn and "dn-seg" in dn and "60%" in dn
+    tl = R.render_widget({"type": "timeline", "title": "Form",
+                          "items": [{"outcome": "win", "label": "g1"},
+                                    {"outcome": "loss", "label": "g2"}]})
+    assert "timeline" in tl and tl.count("tl-cell") == 2
+
+
 def test_eval_and_board_handlers():
     ev = R.render_widget({"type": "eval",
                           "plies": [{"ply": 0, "cp": 0}, {"ply": 1, "cp": 50}],
@@ -38,7 +49,8 @@ def test_eval_and_board_handlers():
 
 def test_css_includes_review_styles():
     css = R.css()
-    for token in (".rv-svg", ".rv-evalbar", ".rv-hl-blunder", ".rv-board"):
+    for token in (".rv-svg", ".rv-evalbar", ".rv-hl-blunder", ".rv-board",
+                  ".donut", ".dn-svg", ".tl-cell", ".bs-note"):
         assert token in css, f"missing {token} in stylesheet"
 
 

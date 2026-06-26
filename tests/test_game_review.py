@@ -7,9 +7,10 @@ import chess
 
 from chessanalysis.contexts import GameContext
 from chessanalysis.enrich import engine as eng
+from chessanalysis.enrich.engine import GameAnalysis, MoveEval
 from chessanalysis.metrics.game.review import (
-    _drift_runs, _quality_counts, board_explorer, conversion, error_profile,
-    eval_graph, move_quality, summary,
+    _drift_runs, _quality_counts, board_explorer, conversion, depth_delta,
+    error_profile, eval_graph, move_quality, summary,
 )
 
 from .conftest import FakeGame, build_raw
@@ -94,6 +95,24 @@ def test_error_profile_flags_tactical_miss(sample_analysis):
     assert explain["type"] == "text" and note["type"] == "text"
     by_side = {r[0]: r for r in table["rows"]}
     assert by_side["Black"][1] >= 1               # the 570cp drop is a tactical miss
+
+
+def test_depth_delta_flags_shallow_only_moves(monkeypatch):
+    def m(ply, color, label, san="x"):
+        return MoveEval(ply=ply, color=color, san=san, best_san="", cp_loss=0,
+                        wp_loss=0.0, accuracy=100.0, label=label, fen_before="", move_uci="")
+    # high (review) depth flags white's Qh5 as a blunder; the shallow pass calls it ok
+    hi = GameAnalysis(depth=18, engine_name="x", evals=[0] * 4,
+                      moves=[m(1, "white", "blunder", "Qh5"), m(2, "black", "ok"),
+                             m(3, "white", "ok")])
+    lo = GameAnalysis(depth=12, engine_name="x", evals=[0] * 4,
+                      moves=[m(1, "white", "ok", "Qh5"), m(2, "black", "ok"),
+                             m(3, "white", "ok")])
+    monkeypatch.setattr(eng, "analyse_game", lambda game, depth: lo)
+    explain, table, note = depth_delta(
+        GameContext(game=FakeGame(color="white"), analysis=hi, player="me"))
+    assert table["rows"][0] == ["White", 1]       # one shallow-only error for white
+    assert "Qh5" in note["body"]
 
 
 def test_eval_graph_plies_align(sample_analysis):

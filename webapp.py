@@ -167,7 +167,7 @@ def api_conversion():
     finally:
         if proc:
             proc.quit()
-    sections = insights.conversion_report(pairs, cp) + insights.form_report(pairs)
+    sections = insights.conversion_report(pairs, cp) + insights.advanced_report(pairs)
     return jsonify({"sections": sections})
 
 

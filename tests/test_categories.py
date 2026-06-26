@@ -40,20 +40,43 @@ def test_every_player_metric_is_categorised():
 
 # --- momentum / tilt --------------------------------------------------------
 
-def test_momentum_buckets_by_previous_result():
-    # W, L, L, W : after-win->loss; after-loss->{loss,win}; streak(2+)->the final win
+def _wdl_by_label(barstack):
+    """{label: {win/draw/loss: n}} from a W/D/L barstack widget."""
+    return {r["label"]: {s["name"]: s["value"] for s in r["segments"]}
+            for r in barstack["rows"]}
+
+
+def test_momentum_same_day_buckets():
+    # all same (empty) date: g1 is first-of-day, then same-day transitions
+    # W, L, L, W : after-win->loss; after-loss->{loss,win}; streak(2+)->final win
     games = [make_game(o) for o in ("win", "loss", "loss", "win")]
-    rows = {r["label"]: r for r in momentum(_ctx(games))["rows"]}
-    assert rows["After a win"]["loss"] == 1
-    assert rows["After a loss"]["loss"] == 1 and rows["After a loss"]["win"] == 1
-    assert rows["On a 2+ loss streak"]["win"] == 1
+    strip, chart = momentum(_ctx(games))
+    assert strip["type"] == "timeline" and len(strip["items"]) == 4
+    rows = _wdl_by_label(chart)
+    assert rows["First game of the day"]["win"] == 1
+    assert rows["After a win (same day)"]["loss"] == 1
+    assert rows["After a loss (same day)"]["loss"] == 1
+    assert rows["After a loss (same day)"]["win"] == 1
+    assert rows["On a 2+ loss streak (same day)"]["win"] == 1
+
+
+def test_momentum_resets_across_days():
+    # day 1: win ; day 2: loss then win. The day1->day2 pair must NOT count as
+    # 'after a win'; only the same-day day2 loss->win transition does.
+    g1 = make_game("win"); g1.headers["Date"] = "2026.01.01"
+    g2 = make_game("loss"); g2.headers["Date"] = "2026.01.02"
+    g3 = make_game("win"); g3.headers["Date"] = "2026.01.02"
+    rows = _wdl_by_label(momentum(_ctx([g1, g2, g3]))[1])
+    assert rows["First game of the day"]["win"] == 1 and rows["First game of the day"]["loss"] == 1
+    assert "After a win (same day)" not in rows          # cross-day pair excluded
+    assert rows["After a loss (same day)"]["win"] == 1   # the same-day pair counts
 
 
 # --- game length ------------------------------------------------------------
 
 def test_game_length_buckets():
     games = [make_game("win", plies=10), make_game("loss", plies=90)]
-    rows = {r["label"]: r for r in by_game_length(_ctx(games))["rows"]}
+    rows = _wdl_by_label(by_game_length(_ctx(games)))
     assert rows["Short (< 20 moves)"]["win"] == 1
     assert rows["Long (> 40 moves)"]["loss"] == 1
 

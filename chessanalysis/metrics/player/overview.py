@@ -11,7 +11,7 @@ def summary(ctx):
         rec.add(g.outcome)
     elos = [g.user_elo for g in ctx.games if g.user_elo]
     pct = f"{100 * rec.winrate:.0f}%" if rec.total else "—"
-    return W.cards([
+    cards = W.cards([
         W.card(rec.win, "Wins"),
         W.card(rec.draw, "Draws"),
         W.card(rec.loss, "Losses"),
@@ -19,6 +19,15 @@ def summary(ctx):
         W.card(elos[-1] if elos else "—", "Latest Elo"),
         W.card(max(elos) if elos else "—", "Peak Elo"),
     ])
+    if not rec.total:
+        return cards
+    pal = W.WDL_PALETTE
+    donut = W.donut(
+        [{"name": "win", "value": rec.win, "color": pal["win"]},
+         {"name": "draw", "value": rec.draw, "color": pal["draw"]},
+         {"name": "loss", "value": rec.loss, "color": pal["loss"]}],
+        center=pct, sub="win rate")
+    return [cards, donut]
 
 
 @metric("player", title="Rating", order=15, category="Overview")

@@ -8,8 +8,9 @@ Answers "where do I perform well or poorly?" along several axes:
 """
 from __future__ import annotations
 
-import statistics
 from collections import Counter
+
+import chess
 
 from . import widgets as W
 
@@ -139,98 +140,107 @@ def conversion_report(pairs, cp: int = 200) -> list[dict]:
     ]
 
 
-def form_report(pairs) -> list[dict]:
-    """Test the "I have good/bad periods" theory on per-DAY accuracy.
+# --- advanced, engine-derived diagnostics -----------------------------------
+OPP_DROP = 150        # cp the opponent must hand you in one move to count as a chance
+SHARP_GAP = 150       # cp gap between the engine's #1 and #2 = a "sharp" position
+ERROR_LABELS = {"mistake", "blunder"}
 
-    Aggregating to one value per day first is important: many games on a single
-    bad day are correlated, so a per-game test would fake clustering. We average
-    accuracy per day, then look for streaks/cycles across days.
 
-    * runs test — do good/bad days cluster into streaks more than chance?
-    * autocorrelation — is there a repeating cycle length (in active days)?
-    * a rolling daily-accuracy chart to see the waves.
-    pairs must be in chronological order.
+def _is_error(label) -> bool:
+    return label in ERROR_LABELS
+
+
+def advanced_report(pairs) -> list[dict]:
+    """Five engine-derived diagnostics aggregated over all analysed games.
+
+    Uses each GameAnalysis's per-move evals, multi-PV candidates (top_moves),
+    SAN/best-move and the board (fen_before) — so no extra engine work beyond
+    the analysis the conversion pass already ran.
     """
-    day_acc: dict = {}
+    opp_chances = opp_taken = 0                       # opponent-error capitalization
+    err_followed = err_then_err = 0                   # cascading errors
+    base_moves = base_err = 0
+    sharp_cpl, calm_cpl = [], []                      # sharpness vulnerability
+    tension_pos = tension_premature = 0               # tension resolution
+
     for g, a in pairs:
-        v = a.accuracy.get(g.color)
-        if v is not None:
-            day_acc.setdefault(g.date, []).append(v)
+        evals = a.evals
+        if not evals:
+            continue
+        sgn = 1 if g.color == "white" else -1
+        moves, tops = a.moves, a.top_moves
 
-    days = sorted(day_acc)                       # "YYYY.MM.DD" sorts chronologically
-    accs = [sum(day_acc[d]) / len(day_acc[d]) for d in days]   # mean accuracy per day
-    games_per_day = sum(len(v) for v in day_acc.values()) / len(days) if days else 0
-    dates = days
-    n = len(accs)
-    if n < 8:
-        return [{"title": "Form & cycles", "widgets": [W.text(
-            f"Only {n} active day(s) of games — need more days to test for cycles.")]}]
+        # Opponent error capitalization: opponent hands you ≥OPP_DROP in one move,
+        # do you reply with the engine's #1 (the refutation)?
+        for i, m in enumerate(moves):
+            if m.color == g.color:
+                continue
+            p = m.ply
+            if not (1 <= p < len(evals)):
+                continue
+            if sgn * evals[p] - sgn * evals[p - 1] >= OPP_DROP:
+                opp_chances += 1
+                nxt = moves[i + 1] if i + 1 < len(moves) else None
+                if nxt and nxt.color == g.color and nxt.best_san and nxt.san == nxt.best_san:
+                    opp_taken += 1
 
-    # rolling average over days (visual)
-    win = max(3, n // 10)
-    roll = []
-    for i in range(n):
-        seg = accs[max(0, i - win + 1):i + 1]
-        roll.append({"x": dates[i], "y": round(sum(seg) / len(seg), 1)})
-    line = W.line([{"name": f"Rolling daily accuracy (window {win} days)", "points": roll}],
-                  y_label="Accuracy")
-    line["toolbar"] = False
+        # Cascading error probability: P(error | previous move was an error),
+        # over your own consecutive moves.
+        mine = [m for m in moves if m.color == g.color]
+        for j, m in enumerate(mine):
+            base_moves += 1
+            base_err += _is_error(m.label)
+            if _is_error(m.label) and j + 1 < len(mine):
+                err_followed += 1
+                err_then_err += _is_error(mine[j + 1].label)
 
-    # autocorrelation: peak positive acf over candidate cycle lengths
-    mean = sum(accs) / n
-    var = sum((x - mean) ** 2 for x in accs)
+        # Sharpness vulnerability + tension resolution: per own move, look at the
+        # multi-PV candidates and the board at that position.
+        for m in mine:
+            idx = m.ply - 1
+            cand = tops[idx] if 0 <= idx < len(tops) else []
+            if len(cand) >= 2:
+                gap = abs(cand[0]["cp"] - cand[1]["cp"])
+                (sharp_cpl if gap >= SHARP_GAP else calm_cpl).append(m.cp_loss)
+            if cand and m.fen_before and m.move_uci:
+                try:
+                    b = chess.Board(m.fen_before)
+                    played = chess.Move.from_uci(m.move_uci)
+                    best = chess.Move.from_uci(cand[0]["uci"])
+                except (ValueError, IndexError):
+                    continue
+                if sum(b.is_capture(mv) for mv in b.legal_moves) >= 2:
+                    tension_pos += 1
+                    # you released the tension (captured) but the engine kept it
+                    if b.is_capture(played) and not b.is_capture(best):
+                        tension_premature += 1
 
-    def acf(lag):
-        return (sum((accs[i] - mean) * (accs[i + lag] - mean)
-                    for i in range(n - lag)) / var) if var else 0.0
+    if not base_moves:
+        return []
 
-    best_lag, best = 0, 0.0
-    for lag in range(2, min(25, n // 2) + 1):
-        r = acf(lag)
-        if r > best:
-            best, best_lag = r, lag
-    sig = 2 / (n ** 0.5)   # ~95% significance band for autocorrelation
-
-    # runs test on above/below median accuracy (Wald–Wolfowitz)
-    med = statistics.median(accs)
-    b = [1 if x >= med else 0 for x in accs]
-    n1, n2 = sum(b), n - sum(b)
-    runs = 1 + sum(1 for i in range(1, n) if b[i] != b[i - 1])
-    z = 0.0
-    if n1 and n2:
-        exp = 2 * n1 * n2 / n + 1
-        v = 2 * n1 * n2 * (2 * n1 * n2 - n) / (n * n * (n - 1))
-        if v > 0:
-            z = (runs - exp) / (v ** 0.5)
-
-    if z <= -1.96:
-        pattern, psub = "Streaky", f"good & bad days cluster (z={z:.1f})"
-    elif z >= 1.96:
-        pattern, psub = "Alternating", f"good/bad days alternate (z={z:.1f})"
-    else:
-        pattern, psub = "Random", f"no clustering (z={z:.1f})"
-    cyc = f"~{best_lag} days" if best > sig else "none clear"
+    pct = lambda n, d: f"{round(100 * n / d)}%" if d else "—"
+    mean = lambda xs: round(sum(xs) / len(xs)) if xs else None
+    sharp_acpl, calm_acpl = mean(sharp_cpl), mean(calm_cpl)
+    casc = pct(err_then_err, err_followed)
+    base_rate = pct(base_err, base_moves)
 
     cards = W.cards([
-        W.card(pattern, "Form pattern", sub=psub),
-        W.card(cyc, "Strongest cycle", sub=f"autocorr {best:.2f} (sig > {sig:.2f})"),
-        W.card(f"{n} days", "Active days", sub=f"~{games_per_day:.1f} games/day"),
-        W.card(f"{round(roll[-1]['y'])}% vs {round(mean)}%", "Recent vs overall",
-               sub="rolling now vs your mean"),
+        W.card(pct(opp_taken, opp_chances), "Opponent-error capitalization",
+               sub=f"{opp_taken}/{opp_chances} refuted with the top move"),
+        W.card(casc, "Cascading-error probability",
+               sub=f"P(error | prior error) · base {base_rate}"),
+        W.card(sharp_acpl if sharp_acpl is not None else "—", "Sharpness ACPL",
+               sub=f"in sharp spots vs {calm_acpl if calm_acpl is not None else '—'} calm"),
+        W.card(pct(tension_premature, tension_pos), "Premature simplification",
+               sub=f"{tension_premature}/{tension_pos} tense positions released early"),
     ])
-
-    if z <= -1.96:
-        verdict = (f"Your form is streaky day-to-day: good and bad days cluster more than "
-                   f"chance (runs test z={z:.1f}). That backs up your theory of better/worse periods.")
-    elif z >= 1.96:
-        verdict = (f"Your days tend to alternate rather than cluster (z={z:.1f}) — "
-                   f"the opposite of sustained cycles.")
-    else:
-        verdict = (f"Day-to-day form looks essentially random (runs test z={z:.1f}): "
-                   f"no statistical evidence of sustained good/bad periods in this window.")
-    verdict += (f" Strongest repeating period ≈ {best_lag} active days (autocorrelation {best:.2f})."
-                if best > sig else
-                " No clear fixed-length cycle stands out in the autocorrelation.")
-    verdict += f" Based on {n} active days (~{games_per_day:.1f} games/day)."
-
-    return [{"title": "Form & cycles", "widgets": [cards, line, W.text(verdict)]}]
+    notes = W.text(
+        "Opponent-error capitalization — when the opponent blunders ≥1.5 pawns, how "
+        "often you find the engine's refutation (offensive sharpness). "
+        "Cascading-error probability — chance your next move is also an error right "
+        "after a mistake; well above your base error rate signals tilt. "
+        "Sharpness ACPL — average centipawn loss only in positions where the best "
+        "move is far ahead of the second-best (calculation under pressure). "
+        "Premature simplification — share of multi-capture positions where you "
+        "released the tension but the engine preferred to keep it.")
+    return [{"title": "Advanced metrics", "widgets": [cards, notes]}]

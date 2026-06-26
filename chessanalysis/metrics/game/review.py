@@ -192,6 +192,45 @@ def error_profile(ctx):
     return [explain, table, note]
 
 
+@metric("game", title="Depth-dependent errors", order=37, needs=("engine",))
+def depth_delta(ctx):
+    """Moves a shallow search is happy with that a deeper search refutes.
+
+    Re-analyses the game at a shallower depth and compares move-by-move: a move
+    classified 'ok' shallow but a mistake/blunder at the review depth was chosen
+    on superficial calculation — refuted only by a deeper, non-obvious line.
+    """
+    from ...enrich import engine as eng
+    a_hi = ctx.analysis
+    low = max(6, a_hi.depth - 6)
+    if not a_hi.moves or a_hi.depth - low < 4:
+        return None
+
+    a_lo = eng.analyse_game(ctx.game, depth=low)
+    lo_label = {m.ply: m.label for m in a_lo.moves}
+    flips = {"white": [], "black": []}
+    for m in a_hi.moves:
+        if lo_label.get(m.ply) == "ok" and m.label in ("mistake", "blunder"):
+            flips[m.color].append(m)
+
+    explain = W.text(
+        f"A shallow search (depth {low}) is compared against the review depth "
+        f"({a_hi.depth}). Moves the shallow engine likes but the deeper one flags "
+        f"reveal combinations refuted only by deeper, non-obvious continuations.")
+    table = W.table(
+        ["Side", f"Fine at d{low}, error at d{a_hi.depth}"],
+        [[s.title(), len(flips[s])] for s in ("white", "black")])
+
+    me = ctx.game.color
+    if flips[me]:
+        spans = "; ".join(f"{_move_label(m)} {m.san} ({m.label})" for m in flips[me])
+        note = W.text(f"Your depth-dependent errors: {spans}.")
+    else:
+        note = W.text(f"None of your moves flipped from fine at depth {low} to an "
+                      f"error at depth {a_hi.depth} — your calculation held up.")
+    return [explain, table, note]
+
+
 @metric("game", title="Key moments", order=40, needs=("engine",))
 def key_moments(ctx):
     a = ctx.analysis

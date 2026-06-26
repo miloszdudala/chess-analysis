@@ -84,25 +84,29 @@ def _ctx(games):
     return PlayerContext(player="me", games=games)
 
 
+def _wdl_by_label(barstack):
+    return {r["label"]: {s["name"]: s["value"] for s in r["segments"]}
+            for r in barstack["rows"]}
+
+
 def test_time_pressure_buckets_by_outcome():
     severe = make_game("600", "white", "win", [595, 30], [590, 580])   # min 30/600=.05
     comfy = make_game("600", "white", "loss", [595, 400], [590, 580])  # min 400/600=.67
     widgets = time_pressure(_ctx([severe, comfy]))
     assert widgets[0]["type"] == "text"
-    you_tbl = widgets[1]
-    assert you_tbl["type"] == "wdl_table"
-    by_label = {r["label"]: r for r in you_tbl["rows"]}
-    assert by_label["Severe (<10% left)"]["win"] == 1
-    assert by_label["Comfortable (>50%)"]["loss"] == 1
+    you = widgets[1]
+    assert you["type"] == "barstack"
+    rows = _wdl_by_label(you)
+    assert rows["Severe (<10% left)"]["win"] == 1
+    assert rows["Comfortable (>50%)"]["loss"] == 1
 
 
-def test_time_pressure_opponent_table_uses_opponent_clock():
+def test_time_pressure_opponent_chart_uses_opponent_clock():
     # opponent (black) crashes to 20/600 = .03 severe; player (white) wins
     g = make_game("600", "white", "win", [595, 500], [590, 20])
-    opp_tbl = time_pressure(_ctx([g]))[2]
-    assert opp_tbl["label_col"] == "When opponent's clock got to"
-    by_label = {r["label"]: r for r in opp_tbl["rows"]}
-    assert by_label["Severe (<10% left)"]["win"] == 1
+    opp = time_pressure(_ctx([g]))[2]
+    assert opp["type"] == "barstack"
+    assert _wdl_by_label(opp)["Severe (<10% left)"]["win"] == 1
 
 
 def test_time_pressure_none_without_clock_data():

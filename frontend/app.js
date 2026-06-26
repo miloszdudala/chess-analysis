@@ -99,11 +99,41 @@ const WIDGETS = {
           `background:${pal[s.name] || "#ccc"}" title="${esc(s.name)}: ${s.value}">` +
           `${pc > 7 ? s.value : ""}</span>`;
       }).join("");
+      const note = r.note ? `<span class="bs-note">${esc(r.note)}</span>` : "";
       return `<div class="bs-row"><span class="bs-label">${esc(r.label)}</span>` +
-        `<span class="bs-bar">${segs}</span></div>`;
+        `<span class="bs-bar">${segs}</span>${note}</div>`;
     }).join("");
     return `<div class="barstack">${w.title ? `<div class="bs-title">${esc(w.title)}</div>` : ""}` +
       `${rows}<div class="bs-legend">${legend}</div></div>`;
+  },
+
+  donut: (w) => {
+    const segs = w.segments.filter((s) => s.value > 0);
+    const total = segs.reduce((s, x) => s + x.value, 0) || 1;
+    let cumulative = 0;
+    const circles = segs.map((s) => {
+      const len = 100 * s.value / total;
+      const c = `<circle class="dn-seg" cx="21" cy="21" r="15.915" fill="none" ` +
+        `stroke="${s.color}" stroke-width="5" stroke-dasharray="${len.toFixed(2)} ${(100 - len).toFixed(2)}" ` +
+        `stroke-dashoffset="${(25 - cumulative).toFixed(2)}"><title>${esc(s.name)}: ${s.value}</title></circle>`;
+      cumulative += len;
+      return c;
+    }).join("");
+    const center = w.center ? `<text class="dn-c" x="21" y="20.5">${esc(w.center)}</text>` : "";
+    const sub = w.sub ? `<text class="dn-s" x="21" y="25.5">${esc(w.sub)}</text>` : "";
+    const legend = segs.map((s) =>
+      `<span class="bs-leg"><i style="background:${s.color}"></i>${esc(s.name)} ${s.value}</span>`).join("");
+    return `<div class="donut"><svg viewBox="0 0 42 42" class="dn-svg">${circles}${center}${sub}</svg>` +
+      `<div class="bs-legend">${legend}</div></div>`;
+  },
+
+  timeline: (w) => {
+    const col = { win: "var(--win)", draw: "var(--draw)", loss: "var(--loss)" };
+    const cells = w.items.map((it) =>
+      `<span class="tl-cell" style="background:${col[it.outcome] || "#ccc"}" ` +
+      `title="${esc(it.label || "")}"></span>`).join("");
+    return `<div class="timeline">${w.title ? `<div class="bs-title">${esc(w.title)}</div>` : ""}` +
+      `<div class="tl-row">${cells}</div></div>`;
   },
 
   movetree: (w) => `<div class="tree">${w.children.map(treeNode).join("")}</div>`,

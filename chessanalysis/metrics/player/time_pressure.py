@@ -44,8 +44,8 @@ def time_pressure(ctx):
     return [
         W.text("Your results grouped by the lowest fraction of the starting "
                "clock each side reached during the game."),
-        W.wdl_table("When your clock got to", _ordered_rows(you)),
-        W.wdl_table("When opponent's clock got to", _ordered_rows(opp)),
+        W.wdl_barstack(_ordered_rows(you), title="When your clock got to…"),
+        W.wdl_barstack(_ordered_rows(opp), title="When your opponent's clock got to…"),
     ]
 
 

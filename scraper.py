@@ -15,6 +15,8 @@ import time
 import urllib.error
 import urllib.request
 
+from chessanalysis import config
+
 API = "https://api.chess.com/pub"
 # Chess.com blocks requests without a real-looking User-Agent.
 HEADERS = {"User-Agent": "chess-analyzer (personal game-analysis tool)"}
@@ -60,12 +62,16 @@ def download_month(archive_url, out_dir, username):
 
 def main():
     ap = argparse.ArgumentParser(description="Scrape Chess.com games to PGN.")
-    ap.add_argument("username", help="Chess.com account name")
-    ap.add_argument("--out", default="games", help="Output folder (default: games)")
+    ap.add_argument("username", nargs="?", default=config.get("CHESS_USERNAME"),
+                    help="Chess.com account name (defaults to CHESS_USERNAME in .env)")
+    ap.add_argument("--out", default=config.get("GAMES_DIR", "games"),
+                    help="Output folder (default: games)")
     ap.add_argument("--year", type=int, help="Only this year")
     ap.add_argument("--month", type=int, help="Only this month (needs --year)")
     args = ap.parse_args()
 
+    if not args.username:
+        sys.exit("No username given. Pass one, or set CHESS_USERNAME in .env.")
     username = args.username.lower()
     os.makedirs(args.out, exist_ok=True)
 

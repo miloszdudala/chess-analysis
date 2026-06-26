@@ -9,6 +9,7 @@ To add a stat, drop a new file there — no changes needed here.
 """
 import argparse
 
+from chessanalysis import config
 from chessanalysis import stats as _stats  # noqa: F401  (triggers auto-discovery)
 from chessanalysis.model import load_games
 from chessanalysis.registry import all_stats
@@ -30,10 +31,16 @@ def build_report(games, user):
 
 def main():
     ap = argparse.ArgumentParser(description="Generate HTML chess stats from PGNs.")
-    ap.add_argument("username", help="Your account name (for your-side W/L)")
-    ap.add_argument("--games", default="games", help="Folder of PGN files")
-    ap.add_argument("--out", default="report.html", help="Output HTML file")
+    ap.add_argument("username", nargs="?", default=config.get("CHESS_USERNAME"),
+                    help="Your account name (defaults to CHESS_USERNAME in .env)")
+    ap.add_argument("--games", default=config.get("GAMES_DIR", "games"),
+                    help="Folder of PGN files")
+    ap.add_argument("--out", default=config.get("REPORT_FILE", "report.html"),
+                    help="Output HTML file")
     args = ap.parse_args()
+
+    if not args.username:
+        raise SystemExit("No username given. Pass one, or set CHESS_USERNAME in .env.")
 
     games = load_games(args.games, args.username)
     if not games:

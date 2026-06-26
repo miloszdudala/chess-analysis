@@ -7,19 +7,24 @@ just dropping one file into `chessanalysis/stats/`.
 ## Usage
 
 ```bash
-# 1. Download your games (uses the public Chess.com API, no key needed)
-python3 scraper.py <username>
+# 0. Set your handle once (gitignored, never committed)
+cp .env.example .env        # then edit CHESS_USERNAME
 
-# Optional: limit to a year / month
-python3 scraper.py <username> --year 2026 --month 6
+# 1. Download your games (uses the public Chess.com API, no key needed)
+python3 scraper.py          # reads CHESS_USERNAME from .env
+
+# Optional: limit to a year / month, or pass a handle explicitly
+python3 scraper.py someone_else --year 2026 --month 6
 
 # 2. Build the HTML report
-python3 analyze.py <username>
+python3 analyze.py
 open report.html
 ```
 
-Games are saved to `games/` and the report to `report.html` — both are
-gitignored, so no personal data is committed.
+Config lives in `.env` (`CHESS_USERNAME`, `GAMES_DIR`, `REPORT_FILE`); see
+`.env.example`. Any value can be overridden inline, e.g.
+`CHESS_USERNAME=foo python3 analyze.py`. Games are saved to `games/` and the
+report to `report.html` — both are gitignored, so no personal data is committed.
 
 ## Architecture
 

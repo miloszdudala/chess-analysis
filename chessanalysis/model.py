@@ -104,6 +104,25 @@ class Game:
         return self.h("UTCDate") or self.h("Date", "")
 
     @property
+    def game_id(self) -> str:
+        """Stable identity for de-duplication across files.
+
+        Chess.com Link/URL tags embed a numeric game id; the same game can
+        appear under different Link formats (e.g. .../analysis), so we pull the
+        id out. Falls back to players + start time for non-Chess.com PGNs.
+        """
+        for tag in ("Link", "ECOUrl"):
+            url = self.h(tag)
+            m = re.search(r"/(?:live|daily)/(\d+)", url)
+            if m:
+                return m.group(1)
+        return "|".join((
+            self.h("White"), self.h("Black"),
+            self.h("UTCDate") or self.h("Date"),
+            self.h("UTCTime") or self.h("StartTime"),
+        ))
+
+    @property
     def sort_key(self) -> str:
         """Chronological, lexicographically sortable."""
         d = self.h("EndDate") or self.h("UTCDate") or self.h("Date", "")
@@ -209,10 +228,15 @@ def bind(game: Game, user: str) -> Game | None:
 def load_games(folder: str, user: str) -> list[Game]:
     """Load all PGNs in `folder`, bound to `user`, sorted chronologically."""
     games: list[Game] = []
+    seen: set[str] = set()
     for path in glob.glob(os.path.join(folder, "*.pgn")):
         for g in parse_pgn_file(path):
             bound = bind(g, user)
-            if bound:
-                games.append(bound)
+            if not bound:
+                continue
+            if bound.game_id in seen:   # same game in two files — keep one
+                continue
+            seen.add(bound.game_id)
+            games.append(bound)
     games.sort(key=lambda g: g.sort_key)
     return games

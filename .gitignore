@@ -4,6 +4,8 @@ games/
 
 # Generated reports & analysis output
 report.html
+report.json
+report*.json
 out/
 data/cache/
 

@@ -1,0 +1,18 @@
+# Personal game data — never commit (contains account names & game history)
+games/
+*.pgn
+
+# Generated report
+report.html
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

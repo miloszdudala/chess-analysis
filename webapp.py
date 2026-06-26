@@ -148,12 +148,15 @@ def api_conversion():
 
     user = request.args.get("user") or config.get("CHESS_USERNAME")
     fmt = request.args.get("format") or None
+    n = request.args.get("n", default=0, type=int)
     cp = int(config.get("DECISIVE_CP", "200"))
     depth = int(config.get("RECENT_DEPTH", "12"))
 
-    games = load_games(GAMES_DIR, user)
+    games = load_games(GAMES_DIR, user)        # chronological (oldest -> newest)
     if fmt:
         games = [g for g in games if g.time_class == fmt]
+    if n and n > 0:
+        games = games[-n:]                     # last X games
 
     proc, pairs = None, []
     try:
@@ -164,7 +167,8 @@ def api_conversion():
     finally:
         if proc:
             proc.quit()
-    return jsonify({"sections": insights.conversion_report(pairs, cp)})
+    sections = insights.conversion_report(pairs, cp) + insights.form_report(pairs)
+    return jsonify({"sections": sections})
 
 
 @app.get("/api/game")

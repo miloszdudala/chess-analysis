@@ -25,7 +25,7 @@ def run_metrics(scope: str, ctx, doc) -> None:
     from ..registry import metrics_for
     for m in metrics_for(scope):
         result = m.fn(ctx)
-        doc.add(m.title, result)
+        doc.add(m.title, result, category=m.category)
 
 
 def get(name: str):

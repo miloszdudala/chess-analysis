@@ -28,17 +28,19 @@ class Metric:
     order: int
     fn: MetricFn
     needs: tuple = ()          # capability hints, e.g. ("engine",) — for docs/validation
+    category: str | None = None   # groups sections in the UI (e.g. "Openings")
     id: str = ""
 
 
 _REGISTRY: list[Metric] = []
 
 
-def metric(scope: str, title: str | None = None, order: int = 100, needs=()):
+def metric(scope: str, title: str | None = None, order: int = 100,
+           needs=(), category: str | None = None):
     def deco(fn: MetricFn) -> MetricFn:
         _REGISTRY.append(Metric(
             scope=scope, title=title, order=order, fn=fn,
-            needs=tuple(needs), id=fn.__name__,
+            needs=tuple(needs), category=category, id=fn.__name__,
         ))
         return fn
     return deco

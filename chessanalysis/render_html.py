@@ -174,11 +174,39 @@ def _text(w) -> str:
     return f'<p class="text">{w["body"]}</p>'
 
 
+def _review(w) -> str:
+    # Fully interactive (board navigation + engine arrows); web app only.
+    return ('<p class="text">The move-by-move board explorer is interactive — '
+            'open the web app (<code>python webapp.py</code>) to play through it.</p>')
+
+
+def _barstack(w) -> str:
+    pal = w["palette"]
+    # legend follows the bar's segment order, not the palette dict's key order
+    order = [s["name"] for s in w["rows"][0]["segments"]] if w["rows"] else list(pal)
+    legend = "".join(
+        f'<span class="bs-leg"><i style="background:{pal.get(name, "#ccc")}"></i>{esc(name)}</span>'
+        for name in order)
+    rows = []
+    for r in w["rows"]:
+        total = sum(s["value"] for s in r["segments"]) or 1
+        segs = "".join(
+            f'<span class="bs-seg" style="width:{100 * s["value"] / total:.1f}%;'
+            f'background:{pal.get(s["name"], "#ccc")}" title="{esc(s["name"])}: {s["value"]}">'
+            f'{s["value"] if 100 * s["value"] / total > 7 else ""}</span>'
+            for s in r["segments"] if s["value"] > 0)
+        rows.append(f'<div class="bs-row"><span class="bs-label">{esc(r["label"])}</span>'
+                    f'<span class="bs-bar">{segs}</span></div>')
+    title = f'<div class="bs-title">{esc(w["title"])}</div>' if w.get("title") else ""
+    return (f'<div class="barstack">{title}{"".join(rows)}'
+            f'<div class="bs-legend">{legend}</div></div>')
+
+
 _HANDLERS = {
     "cards": _cards, "table": _table, "wdl_table": _wdl_table, "line": _line,
     "eval": _eval, "board": _board, "group": _group, "ranking": _ranking,
     "movetree": _movetree, "recent": _recent, "conversion": _conversion,
-    "text": _text,
+    "text": _text, "review": _review, "barstack": _barstack,
 }
 
 
@@ -201,6 +229,10 @@ _CSS = """
   h2 { font-size:.78rem; font-weight:600; letter-spacing:.13em; text-transform:uppercase;
        color:var(--mut); margin:2.4rem 0 .8rem; padding-bottom:.4rem;
        border-bottom:1px solid var(--line); }
+  .cat-head { font-size:1.15rem; font-weight:600; letter-spacing:-.01em; color:var(--ink);
+              margin:2.8rem 0 .2rem; }
+  .cat-head:first-of-type { margin-top:1.4rem; }
+  .cat-head + h2 { margin-top:1rem; }
   h3 { font-size:.72rem; font-weight:600; letter-spacing:.1em; text-transform:uppercase;
        color:var(--mut); margin:0 0 .6rem; }
   .sub-title { color:var(--mut); margin:0 0 1.5rem; }
@@ -281,14 +313,93 @@ _CSS = """
   /* eval graph — static (.evalg) and interactive (.evalc) */
   .evalg { width:100%; height:120px; border-radius:10px; background:#2c2a26; }
   .eval-host { position:relative; }
-  svg.evalc { display:block; width:100%; height:auto; border-radius:10px; }
+  svg.evalc { display:block; width:100%; height:auto; }
   .ev-black { fill:#2c2a26; } .ev-white { fill:#e7e3da; }
   .ev-mid { stroke:#ffffff33; stroke-width:1; vector-effect:non-scaling-stroke; }
-  .ev-line { fill:none; stroke:#888; stroke-width:1; vector-effect:non-scaling-stroke; }
+  .ev-grid { stroke:#88888855; stroke-width:1; vector-effect:non-scaling-stroke; }
+  .ev-zero { stroke:#777; stroke-width:1.4; vector-effect:non-scaling-stroke; }
+  .ev-line { fill:none; stroke:#5a5a5a; stroke-width:1.4; vector-effect:non-scaling-stroke; }
+  svg.evalc text.ev-ax { fill:var(--mut); font-size:10px; font-family:var(--mono); }
   circle.m-blunder { fill:var(--loss); } circle.m-mistake { fill:#d99a3a; }
   circle.m-inaccuracy { fill:#e0b020; }
   .spark { width:100%; height:64px; }
   .spark polyline { fill:none; stroke:var(--accent); stroke-width:1.5; vector-effect:non-scaling-stroke; }
+  /* stacked-bar chart */
+  .barstack { background:var(--panel); border:1px solid var(--line); border-radius:12px;
+              padding:.85rem 1rem; }
+  .bs-title { font-size:.8rem; color:var(--mut); margin-bottom:.5rem; }
+  .bs-row { display:flex; align-items:center; gap:.7rem; margin:.35rem 0; }
+  .bs-label { width:3.4rem; font-size:.82rem; color:var(--mut); flex:0 0 auto; }
+  .bs-bar { flex:1; display:flex; height:22px; border-radius:5px; overflow:hidden;
+            background:var(--line); }
+  .bs-seg { display:flex; align-items:center; justify-content:center; color:#fff;
+            font:600 .72rem var(--mono); min-width:0; transition:width .2s; }
+  .bs-legend { display:flex; flex-wrap:wrap; gap:.3rem .9rem; margin-top:.65rem; }
+  .bs-leg { display:inline-flex; align-items:center; gap:.35rem; font-size:.72rem;
+            color:var(--mut); text-transform:capitalize; }
+  .bs-leg i { width:10px; height:10px; border-radius:2px; }
+  /* interactive review board (web app) */
+  .rv { display:flex; gap:1rem; flex-wrap:wrap; align-items:flex-start; }
+  .rv-main { display:flex; flex-direction:column; gap:.45rem;
+             flex:1 1 320px; max-width:440px; min-width:280px; }
+  .rv-evalbar { position:relative; height:22px; width:100%; border-radius:6px;
+                overflow:hidden; background:#2c2a26; }
+  .rv-fill { position:absolute; top:0; bottom:0; left:0; background:#e7e3da;
+             transition:width .18s ease; }
+  .rv-en { position:absolute; top:0; bottom:0; display:flex; align-items:center;
+           font:600 .72rem var(--mono); padding:0 .5rem; z-index:1; }
+  .rv-en-l { left:0; color:#2c2a26; } .rv-en-r { right:0; color:#e7e3da; }
+  .rv-board { width:100%; }
+  .rv-svg { width:100%; height:auto; display:block; border-radius:8px;
+            box-shadow:0 1px 6px #0001; }
+  .rv-l { fill:#ecd9b6; } .rv-d { fill:#b08a5e; }
+  /* last-move highlight, tinted by how good the move was */
+  .rv-hl { fill:#cdd06a !important; }
+  .rv-hl-best { fill:#8fb96a !important; }
+  .rv-hl-inaccuracy { fill:#dac35a !important; }
+  .rv-hl-mistake { fill:#e0a85a !important; }
+  .rv-hl-blunder { fill:#d98a72 !important; }
+  .rv-p { text-anchor:middle; pointer-events:none; }
+  .rv-pw { fill:#fafafa; stroke:#3a342c; stroke-width:.8px; }
+  .rv-pb { fill:#2b2824; stroke:#0c0b0a; stroke-width:.6px; }
+  .rv-co { fill:#00000055; font:600 9px var(--mono); pointer-events:none; }
+  .rv-side { flex:1 1 240px; min-width:230px; display:flex; flex-direction:column; gap:.6rem; }
+  .rv-players { display:flex; justify-content:space-between; font-size:.82rem; color:var(--mut); }
+  .rv-info { background:var(--panel); border:1px solid var(--line); border-radius:10px;
+             padding:.55rem .7rem; font-size:.9rem; min-height:1.2rem; }
+  .rv-mv { font:600 .95rem var(--mono); }
+  .rv-tag { font-size:.74rem; padding:.05rem .45rem; border-radius:5px; margin-left:.3rem;
+            white-space:nowrap; }
+  .rv-tag b { font-family:var(--mono); }
+  .rv-best { color:#3f9d5a; } .rv-blunder { color:#d0493b; }
+  .rv-mistake { color:#e08a2b; } .rv-inaccuracy { color:#c69a16; }
+  .rv-tag.rv-best { background:#3f9d5a22; } .rv-tag.rv-blunder { background:#d0493b22; }
+  .rv-tag.rv-mistake { background:#e08a2b22; } .rv-tag.rv-inaccuracy { background:#e0b02022; }
+  .rv-engine { background:var(--panel); border:1px solid var(--line); border-radius:10px;
+               padding:.5rem .7rem; display:flex; flex-wrap:wrap; align-items:center; gap:.3rem .8rem; }
+  .rv-eh { font-size:.68rem; text-transform:uppercase; letter-spacing:.08em; color:var(--mut);
+           width:100%; }
+  .rv-line { display:inline-flex; align-items:center; gap:.35rem; font-size:.85rem;
+             font-variant-numeric:tabular-nums; }
+  .rv-line i { width:9px; height:9px; border-radius:2px; display:inline-block; }
+  .rv-line b { font-family:var(--mono); }
+  .rv-nav { display:flex; gap:.3rem; }
+  .rv-nav button { flex:1; background:var(--panel); border:1px solid var(--line);
+                   border-radius:8px; padding:.35rem 0; font-size:.95rem; cursor:pointer;
+                   color:var(--ink); }
+  .rv-nav button:hover { background:var(--bg); border-color:var(--accent); }
+  .rv-moves { display:grid; grid-template-columns:auto 1fr 1fr; gap:.05rem .3rem;
+              background:var(--panel); border:1px solid var(--line); border-radius:10px;
+              padding:.5rem .6rem; max-height:230px; overflow-y:auto;
+              font-size:.85rem; align-content:start; }
+  .rv-no { color:var(--mut); font-family:var(--mono); font-size:.78rem; text-align:right;
+           padding-right:.2rem; }
+  .rv-m { cursor:pointer; padding:.1rem .35rem; border-radius:5px; font-family:var(--mono); }
+  .rv-m:hover { background:var(--bg); }
+  .rv-m.on { background:var(--accent); color:#fff; }
+  .rv-m.m-blunder { color:#d0493b; } .rv-m.m-mistake { color:#e08a2b; }
+  .rv-m.m-inaccuracy { color:#c69a16; }
+  .rv-m.on.m-blunder, .rv-m.on.m-mistake, .rv-m.on.m-inaccuracy { color:#fff; }
   figure.board { margin:0; background:var(--panel); border:1px solid var(--line);
                  border-radius:12px; padding:.6rem; width:240px; }
   figure.board svg { width:100%; height:auto; border-radius:6px; }
@@ -307,7 +418,11 @@ def css() -> str:
 def render_sections(doc: Document) -> str:
     """Just the section widgets (no page shell) — for embedding / the web app."""
     body = []
+    current_cat = None
     for s in doc.sections:
+        if s.category and s.category != current_cat:
+            body.append(f'<div class="cat-head">{esc(s.category)}</div>')
+            current_cat = s.category
         if s.title:
             body.append(f"<h2>{esc(s.title)}</h2>")
         body.extend(render_widget(w) for w in s.widgets)

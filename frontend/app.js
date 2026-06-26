@@ -3,7 +3,7 @@
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-const state = { cfg: null, mode: "player", doc: null, hidden: new Set() };
+const state = { cfg: null, mode: "player", doc: null, category: null };
 const MODE_LABELS = { player: "Player report", game: "Game review", compare: "Compare" };
 const FORMATS = ["bullet", "blitz", "rapid"];
 
@@ -78,12 +78,41 @@ const WIDGETS = {
     return `<div class="eval-host" id="${id}"></div>`;
   },
 
+  review: (w) => {
+    const id = "rv-" + Math.random().toString(36).slice(2);
+    pendingReviews.push({ id, data: w });
+    return `<div class="review-host" id="${id}"></div>`;
+  },
+
+  barstack: (w) => {
+    const pal = w.palette;
+    // legend follows the bar's segment order (palette key order isn't reliable
+    // once the dict round-trips through JSON), falling back to palette keys.
+    const order = (w.rows[0] && w.rows[0].segments.map((s) => s.name)) || Object.keys(pal);
+    const legend = order.map((k) =>
+      `<span class="bs-leg"><i style="background:${pal[k]}"></i>${esc(k)}</span>`).join("");
+    const rows = w.rows.map((r) => {
+      const total = r.segments.reduce((s, seg) => s + seg.value, 0) || 1;
+      const segs = r.segments.filter((s) => s.value > 0).map((s) => {
+        const pc = 100 * s.value / total;
+        return `<span class="bs-seg" style="width:${pc.toFixed(1)}%;` +
+          `background:${pal[s.name] || "#ccc"}" title="${esc(s.name)}: ${s.value}">` +
+          `${pc > 7 ? s.value : ""}</span>`;
+      }).join("");
+      return `<div class="bs-row"><span class="bs-label">${esc(r.label)}</span>` +
+        `<span class="bs-bar">${segs}</span></div>`;
+    }).join("");
+    return `<div class="barstack">${w.title ? `<div class="bs-title">${esc(w.title)}</div>` : ""}` +
+      `${rows}<div class="bs-legend">${legend}</div></div>`;
+  },
+
   movetree: (w) => `<div class="tree">${w.children.map(treeNode).join("")}</div>`,
 
   // line & recent return placeholders; built/loaded after insertion.
+  // toolbar:false => plain zoom/hover chart (no Game/Day/Month grouping).
   line: (w) => {
     const id = "chart-" + Math.random().toString(36).slice(2);
-    pendingCharts.push({ id, series: w.series });
+    pendingCharts.push({ id, series: w.series, toolbar: w.toolbar !== false });
     return `<div class="chart-host" id="${id}"></div>`;
   },
   recent: () => {
@@ -116,6 +145,7 @@ let pendingCharts = [];
 let pendingRecents = [];
 let pendingConversions = [];
 let pendingEvals = [];
+let pendingReviews = [];
 function renderWidget(w) {
   const fn = WIDGETS[w.type];
   return fn ? fn(w) : `<!-- ${w.type} -->`;
@@ -242,8 +272,8 @@ const DOT = { inaccuracy: "#e0b020", mistake: "#e08a2b", blunder: "#d0493b" };
 
 function buildEvalChart(host, plies, moves) {
   if (!plies || plies.length < 2) return;
-  const W = host.clientWidth || 880, H = 200;
-  const M = { l: 8, r: 8, t: 8, b: 8 };
+  const W = host.clientWidth || 880, H = 230;
+  const M = { l: 34, r: 10, t: 10, b: 22 };
   const pw = W - M.l - M.r, ph = H - M.t - M.b;
   const n = plies.length, CLAMP = 1000;
   const clamp = (c) => Math.max(-CLAMP, Math.min(CLAMP, c));
@@ -263,13 +293,28 @@ function buildEvalChart(host, plies, moves) {
     ? `<circle cx="${xPix(i).toFixed(1)}" cy="${yPix(p.cp).toFixed(1)}" r="3.2" fill="${DOT[p.label]}"/>`
     : "").join("");
 
+  // y-axis: eval in pawns; x-axis: move numbers
+  let axes = "";
+  for (const cpv of [800, 500, 200, 0, -200, -500, -800]) {
+    const y = yPix(cpv).toFixed(1);
+    const cls = cpv === 0 ? "ev-zero" : "ev-grid";
+    axes += `<line class="${cls}" x1="${M.l}" y1="${y}" x2="${M.l + pw}" y2="${y}"/>`;
+    const lbl = cpv > 0 ? "+" + cpv / 100 : cpv / 100;
+    axes += `<text class="ev-ax" x="${M.l - 5}" y="${(+y + 3).toFixed(1)}" text-anchor="end">${lbl}</text>`;
+  }
+  for (let t = 0; t <= 5; t++) {
+    const i = Math.round((t / 5) * (n - 1));
+    const moveNo = Math.max(1, Math.ceil(i / 2));
+    axes += `<text class="ev-ax" x="${xPix(i).toFixed(1)}" y="${H - 6}" text-anchor="middle">${moveNo}</text>`;
+  }
+
   svg.innerHTML =
-    `<rect width="${W}" height="${H}" class="ev-black"/>` +
+    `<rect x="${M.l}" y="${M.t}" width="${pw}" height="${ph}" class="ev-black"/>` +
     `<polygon class="ev-white" points="${M.l},${base} ${curve.join(" ")} ${(M.l + pw).toFixed(1)},${base}"/>` +
-    `<line class="ev-mid" x1="${M.l}" y1="${(M.t + ph / 2).toFixed(1)}" x2="${M.l + pw}" y2="${(M.t + ph / 2).toFixed(1)}"/>` +
+    axes +
     `<polyline class="ev-line" points="${curve.join(" ")}"/>` + dots +
     `<g id="g" style="display:none"><line class="chart-guide" y1="${M.t}" y2="${M.t + ph}"/></g>` +
-    `<rect id="ov" x="0" y="0" width="${W}" height="${H}" fill="transparent"/>`;
+    `<rect id="ov" x="${M.l}" y="${M.t}" width="${pw}" height="${ph}" fill="transparent"/>`;
 
   const ov = svg.querySelector("#ov"), g = svg.querySelector("#g");
   const gl = g.querySelector("line");
@@ -291,6 +336,223 @@ function buildEvalChart(host, plies, moves) {
     tip.style.opacity = 1;
   };
   ov.onmouseleave = () => { tip.style.opacity = 0; g.style.display = "none"; };
+}
+
+// ------------------------------------------------- interactive review board
+
+const GLYPH = { p: "♟", n: "♞", b: "♝", r: "♜", q: "♛", k: "♚" };
+const ARROW_COL = ["#3f9d5a", "#3a78c0", "#c98a30"];   // 1st / 2nd / 3rd best
+// move-quality vocabulary: a worded label per class (no on-board badges)
+const QUAL = {
+  best: { name: "Best move" },
+  inaccuracy: { name: "Inaccuracy" },
+  mistake: { name: "Mistake" },
+  blunder: { name: "Blunder" },
+};
+// classify the played move: matches engine top → best; else its label
+const moveQual = (m) =>
+  m.label === "ok" ? (m.best_san && m.san === m.best_san ? "best" : null) : m.label;
+
+function winProb(cp) { return 50 + 50 * (2 / (1 + Math.exp(-0.00368208 * cp)) - 1); }
+
+function evalText(cp) {
+  if (Math.abs(cp) >= 9000) return (cp > 0 ? "+M" : "−M");
+  const v = cp / 100;
+  return (v > 0 ? "+" : "") + v.toFixed(1);
+}
+
+function parseFen(fen) {
+  const board = {};                       // "file,rank" (0-indexed, rank0 = rank 1)
+  fen.split(" ")[0].split("/").forEach((row, r) => {
+    const rank = 7 - r; let file = 0;
+    for (const ch of row) {
+      if (/\d/.test(ch)) file += +ch;
+      else board[file++ + "," + rank] = ch;
+    }
+  });
+  return board;
+}
+
+const uciSq = (s) => [s.charCodeAt(0) - 97, +s[1] - 1];   // "e4" -> [4,3]
+
+function buildReviewBoard(host, data) {
+  const positions = data.positions, moves = data.moves;
+  if (!positions || positions.length < 2) return;
+  let idx = 0;
+  let flip = data.orientation === "black";
+  const S = 46, BOARD = S * 8, PIECE_F = 34;
+
+  host.innerHTML =
+    `<div class="rv">` +
+      `<div class="rv-main">` +
+        `<div class="rv-board"></div>` +
+        `<div class="rv-evalbar"><div class="rv-fill"></div>` +
+          `<span class="rv-en rv-en-l"></span><span class="rv-en rv-en-r"></span></div>` +
+      `</div>` +
+      `<div class="rv-side">` +
+        `<div class="rv-players"></div>` +
+        `<div class="rv-info"></div>` +
+        `<div class="rv-engine"></div>` +
+        `<div class="rv-nav">` +
+          `<button data-go="0" title="Start (Home)">⏮</button>` +
+          `<button data-go="prev" title="Previous (←)">◀</button>` +
+          `<button data-go="next" title="Next (→)">▶</button>` +
+          `<button data-go="end" title="End (End)">⏭</button>` +
+          `<button data-go="flip" title="Flip board">⤢</button>` +
+        `</div>` +
+        `<div class="rv-moves"></div>` +
+      `</div>` +
+    `</div>`;
+
+  const boardEl = host.querySelector(".rv-board");
+  const fillEl = host.querySelector(".rv-fill");
+  const enL = host.querySelector(".rv-en-l");
+  const enR = host.querySelector(".rv-en-r");
+  const infoEl = host.querySelector(".rv-info");
+  const engineEl = host.querySelector(".rv-engine");
+  const movesEl = host.querySelector(".rv-moves");
+
+  const center = (file, rank) => {
+    const col = flip ? 7 - file : file;
+    const row = flip ? rank : 7 - rank;
+    return [col * S + S / 2, row * S + S / 2];
+  };
+  const sqXY = (file, rank) => {
+    const col = flip ? 7 - file : file;
+    const row = flip ? rank : 7 - rank;
+    return [col * S, row * S];
+  };
+
+  function arrow(uci, color, w) {
+    const [f0, r0] = uciSq(uci.slice(0, 2)), [f1, r1] = uciSq(uci.slice(2, 4));
+    const [x1, y1] = center(f0, r0), [x2, y2] = center(f1, r1);
+    const dx = x2 - x1, dy = y2 - y1, len = Math.hypot(dx, dy) || 1;
+    const ux = dx / len, uy = dy / len, head = 15, hw = 8;
+    const ex = x2 - ux * head, ey = y2 - uy * head, px = -uy, py = ux;
+    return `<line x1="${x1}" y1="${y1}" x2="${ex}" y2="${ey}" stroke="${color}" ` +
+      `stroke-width="${w}" stroke-linecap="round" opacity="0.72"/>` +
+      `<polygon points="${x2},${y2} ${ex + px * hw},${ey + py * hw} ` +
+      `${ex - px * hw},${ey - py * hw}" fill="${color}" opacity="0.72"/>`;
+  }
+
+  function drawBoard() {
+    const pos = positions[idx];
+    const pieces = parseFen(pos.fen);
+    const last = idx > 0 ? moves[idx - 1].uci : null;
+    // the last move's highlight is tinted by how good the move was
+    const q = last ? moveQual(moves[idx - 1]) : null;
+    const hlCls = "rv-hl" + (q ? " rv-hl-" + q : "");
+    let sq = "", pc = "";
+    for (let f = 0; f < 8; f++) for (let r = 0; r < 8; r++) {
+      const [x, y] = sqXY(f, r);
+      const light = (f + r) % 2 === 1;
+      let cls = light ? "rv-l" : "rv-d";
+      if (last && (("" + (last.charCodeAt(0) - 97) + (+last[1] - 1)) === ("" + f + r)
+        || ("" + (last.charCodeAt(2) - 97) + (+last[3] - 1)) === ("" + f + r))) cls += " " + hlCls;
+      sq += `<rect x="${x}" y="${y}" width="${S}" height="${S}" class="${cls}"/>`;
+      const p = pieces[f + "," + r];
+      if (p) {
+        const white = p === p.toUpperCase();
+        // glyph visual centre sits ~0.32·font-size above the baseline
+        const gy = y + S / 2 + PIECE_F * 0.32;
+        pc += `<text x="${(x + S / 2).toFixed(1)}" y="${gy.toFixed(1)}" ` +
+          `font-size="${PIECE_F}" class="rv-p ${white ? "rv-pw" : "rv-pb"}">` +
+          `${GLYPH[p.toLowerCase()]}</text>`;
+      }
+    }
+    // coordinate labels (a-h on bottom rank, 1-8 on left file)
+    let co = "";
+    for (let i = 0; i < 8; i++) {
+      const file = flip ? 7 - i : i, rank = flip ? i : 7 - i;
+      co += `<text x="${i * S + S - 4}" y="${BOARD - 4}" class="rv-co">${"abcdefgh"[file]}</text>`;
+      co += `<text x="3" y="${i * S + 13}" class="rv-co">${rank + 1}</text>`;
+    }
+    // engine's top-3 moves drawn over the pieces (thicker = better)
+    const arrows = pos.best.slice(0, 3).map((m, i) =>
+      arrow(m.uci, ARROW_COL[i], 7 - i * 1.5)).reverse().join("");
+    boardEl.innerHTML =
+      `<svg viewBox="0 0 ${BOARD} ${BOARD}" class="rv-svg">${sq}${co}${pc}${arrows}</svg>`;
+  }
+
+  function render() {
+    const pos = positions[idx];
+    drawBoard();
+    // horizontal eval bar under the board: white fills from the left
+    const wp = winProb(pos.cp);
+    fillEl.style.width = wp.toFixed(1) + "%";
+    const txt = evalText(pos.cp);
+    enL.textContent = pos.cp >= 0 ? txt : "";    // white ahead → show on the white (left) side
+    enR.textContent = pos.cp < 0 ? txt : "";     // black ahead → show on the dark (right) side
+    // info: the move that led to this position + how good it was
+    if (idx === 0) {
+      infoEl.innerHTML = `<span class="rv-mv">Starting position</span>`;
+    } else {
+      const m = moves[idx - 1], no = Math.ceil(idx / 2), dots = idx % 2 ? "." : "…";
+      const qk = moveQual(m), q = QUAL[qk];
+      const lab = q
+        ? ` <span class="rv-tag rv-${qk}">${q.name}` +
+          `${m.label !== "ok" ? ` −${m.wp_loss}% win` : ""}</span>` : "";
+      const better = (m.label !== "ok" && m.best_san && m.best_san !== m.san)
+        ? ` · best <b>${esc(m.best_san)}</b>` : "";
+      infoEl.innerHTML = `<span class="rv-mv">${no}${dots} ${esc(m.san)}</span>${lab}${better}`;
+    }
+    // engine top moves at this position
+    if (pos.best.length) {
+      engineEl.innerHTML = `<div class="rv-eh">Engine</div>` + pos.best.map((m, i) =>
+        `<span class="rv-line"><i style="background:${ARROW_COL[i]}"></i>` +
+        `<b>${esc(m.san)}</b> ${evalText(m.cp)}</span>`).join("");
+    } else {
+      engineEl.innerHTML = "";
+    }
+    movesEl.querySelectorAll(".rv-m").forEach((el) =>
+      el.classList.toggle("on", +el.dataset.ply === idx));
+    const cur = movesEl.querySelector(".rv-m.on");
+    if (cur) cur.scrollIntoView({ block: "nearest" });
+  }
+
+  // players header
+  host.querySelector(".rv-players").innerHTML =
+    `<span>♚ ${esc(data.black)}</span><span>♔ ${esc(data.white)}</span>`;
+
+  // move list (clickable; ply = target position index after the move)
+  let rows = "";
+  for (let i = 0; i < moves.length; i += 2) {
+    const wm = moves[i], bm = moves[i + 1];
+    const cellOf = (m, ply) => m
+      ? `<span class="rv-m m-${m.label}" data-ply="${ply}">${esc(m.san)}</span>` : "<span></span>";
+    rows += `<span class="rv-no">${i / 2 + 1}.</span>` +
+      cellOf(wm, i + 1) + cellOf(bm, i + 2);
+  }
+  movesEl.innerHTML = rows;
+  movesEl.querySelectorAll(".rv-m").forEach((el) => {
+    el.onclick = () => { idx = +el.dataset.ply; render(); };
+  });
+
+  const go = (d) => {
+    if (d === "prev") idx = Math.max(0, idx - 1);
+    else if (d === "next") idx = Math.min(moves.length, idx + 1);
+    else if (d === "end") idx = moves.length;
+    else if (d === "flip") { flip = !flip; render(); return; }
+    else idx = +d;
+    render();
+  };
+  host.querySelectorAll(".rv-nav button").forEach((b) => { b.onclick = () => go(b.dataset.go); });
+
+  // keyboard navigation (only the most recently built board listens)
+  if (window._rvKey) window.removeEventListener("keydown", window._rvKey);
+  window._rvKey = (e) => {
+    if (!document.body.contains(host)) return;
+    const t = e.target.tagName;
+    if (t === "INPUT" || t === "SELECT" || t === "TEXTAREA") return;
+    if (e.key === "ArrowLeft") { go("prev"); e.preventDefault(); }
+    else if (e.key === "ArrowRight") { go("next"); e.preventDefault(); }
+    else if (e.key === "Home") { go("0"); e.preventDefault(); }
+    else if (e.key === "End") { go("end"); e.preventDefault(); }
+    else if (e.key === "f") go("flip");
+  };
+  window.addEventListener("keydown", window._rvKey);
+
+  render();
 }
 
 // ------------------------------------------------------------- recent games
@@ -346,16 +608,36 @@ function renderRecent(body, d) {
 }
 
 async function initConversion(host) {
-  host.innerHTML = `<p class="text"><span class="spinner"></span>Analysing all games (cached after first run)…</p>`;
-  try {
-    const meta = state.doc.meta;
-    const d = await getJSON(`/api/conversion?user=${encodeURIComponent(meta.player)}` +
-      `&format=${meta.format || ""}`);
-    host.innerHTML = d.sections.map((s) =>
-      `<h3>${esc(s.title)}</h3>` + s.widgets.map(renderWidget).join("")).join("");
-  } catch (e) {
-    host.innerHTML = `<p class="text" style="color:var(--loss)">${esc(e.message)}</p>`;
+  let n = 0;   // all games (best for spotting cycles)
+  const bar = document.createElement("div"); bar.className = "chart-toolbar";
+  const body = document.createElement("div");
+  [["All", 0], ["50", 50], ["20", 20], ["10", 10]].forEach(([lbl, val]) => {
+    const b = document.createElement("button");
+    b.className = "gbtn" + (val === n ? " on" : "");
+    b.textContent = lbl;
+    b.onclick = () => { n = val; [...bar.children].forEach((c) => c.classList.toggle("on", c === b)); load(); };
+    bar.appendChild(b);
+  });
+  host.appendChild(bar); host.appendChild(body);
+
+  async function load() {
+    body.innerHTML = `<p class="text"><span class="spinner"></span>Analysing games (cached after first run)…</p>`;
+    try {
+      const meta = state.doc.meta;
+      const d = await getJSON(`/api/conversion?user=${encodeURIComponent(meta.player)}` +
+        `&format=${meta.format || ""}&n=${n}`);
+      // render sections, then init any nested charts they created
+      pendingCharts = []; pendingEvals = [];
+      body.innerHTML = d.sections.map((s) =>
+        `<h3>${esc(s.title)}</h3>` + s.widgets.map(renderWidget).join("")).join("");
+      pendingCharts.forEach((c) => (c.toolbar ? initChart : buildRatingChart)($(c.id), c.series));
+      pendingEvals.forEach((e) => buildEvalChart($(e.id), e.plies, e.moves));
+      pendingCharts = []; pendingEvals = [];
+    } catch (e) {
+      body.innerHTML = `<p class="text" style="color:var(--loss)">${esc(e.message)}</p>`;
+    }
   }
+  load();
 }
 
 async function gotoGame(id) {
@@ -363,7 +645,7 @@ async function gotoGame(id) {
   setStatus("Running Stockfish… first analysis can take a few seconds.", false, true);
   try {
     state.doc = await getJSON(`/api/game?selector=${encodeURIComponent(id)}&depth=${state.cfg.depth}`);
-    state.hidden = new Set(); $("chips").innerHTML = "";
+    state.category = null; $("chips").innerHTML = "";
     renderSections(); setStatus("");
     window.scrollTo({ top: 0, behavior: "smooth" });
   } catch (e) { setStatus(e.message, true); }
@@ -396,39 +678,73 @@ function initChart(host, series) {
 
 // ----------------------------------------------------------------- rendering
 
+// Unique categories in first-appearance order (sections keep their backend order).
+function categoryOrder(doc) {
+  const cats = [];
+  for (const s of doc.sections) {
+    const c = s.category || "";
+    if (c && !cats.includes(c)) cats.push(c);
+  }
+  return cats;
+}
+
 function renderSections() {
   pendingCharts = [];
   pendingRecents = [];
   pendingConversions = [];
   pendingEvals = [];
+  pendingReviews = [];
   const doc = state.doc;
-  const html = doc.sections.filter((s) => !state.hidden.has(s.title)).map((s) =>
-    (s.title ? `<h2>${esc(s.title)}</h2>` : "") + s.widgets.map(renderWidget).join("")
-  ).join("");
+  const cats = categoryOrder(doc);
+  const grouped = cats.length > 0;          // player report; game/compare have none
+
+  const sectionHTML = (s) =>
+    (s.title ? `<h2>${esc(s.title)}</h2>` : "") + s.widgets.map(renderWidget).join("");
+
+  let html;
+  if (grouped) {
+    // bucket sections by category (preserving order), then render group-by-group
+    html = cats
+      .filter((c) => !state.category || c === state.category)
+      .map((c) => {
+        const secs = doc.sections.filter((s) => (s.category || "") === c);
+        return `<div class="cat-head">${esc(c)}</div>` + secs.map(sectionHTML).join("");
+      }).join("");
+    // any uncategorised sections (defensive) render after the groups
+    const orphans = doc.sections.filter((s) => !s.category);
+    if (orphans.length && !state.category) html += orphans.map(sectionHTML).join("");
+  } else {
+    html = doc.sections.map(sectionHTML).join("");
+  }
+
   const link = doc.meta && doc.meta.url ?
     ` <a href="${doc.meta.url}" target="_blank" rel="noopener">↗</a>` : "";
   $("result").innerHTML = `<h1>${esc(doc.title)}${link}</h1>` +
     (doc.subtitle ? `<p class="sub-title">${esc(doc.subtitle)}</p>` : "") + html;
   document.title = doc.title + " · Chess Analyzer";
-  pendingCharts.forEach((c) => initChart($(c.id), c.series));
+  pendingCharts.forEach((c) => (c.toolbar ? initChart : buildRatingChart)($(c.id), c.series));
   pendingRecents.forEach((id) => initRecent($(id)));
   pendingConversions.forEach((id) => initConversion($(id)));
   pendingEvals.forEach((e) => buildEvalChart($(e.id), e.plies, e.moves));
+  pendingReviews.forEach((r) => buildReviewBoard($(r.id), r.data));
 }
 
+// Category pills: filter the report to one category (or "All").
 function renderChips() {
   const doc = state.doc;
   if (!doc || state.mode !== "player") { $("chips").innerHTML = ""; return; }
-  const chips = doc.sections.filter((s) => s.title).map((s) => {
-    const on = !state.hidden.has(s.title);
-    return `<button class="chip ${on ? "on" : ""}" data-sec="${esc(s.title)}">${esc(s.title)}</button>`;
-  }).join("");
-  $("chips").innerHTML = `<span class="lead">Show</span>` + chips;
+  const cats = categoryOrder(doc);
+  if (cats.length < 2) { $("chips").innerHTML = ""; return; }
+  const pill = (label, val, on) =>
+    `<button class="chip ${on ? "on" : ""}" data-cat="${esc(val)}">${esc(label)}</button>`;
+  $("chips").innerHTML = `<span class="lead">View</span>` +
+    pill("All", "", !state.category) +
+    cats.map((c) => pill(c, c, state.category === c)).join("");
   $("chips").querySelectorAll(".chip").forEach((b) => {
     b.onclick = () => {
-      const t = b.dataset.sec;
-      state.hidden.has(t) ? state.hidden.delete(t) : state.hidden.add(t);
+      state.category = b.dataset.cat || null;
       renderChips(); renderSections();
+      window.scrollTo({ top: 0, behavior: "smooth" });
     };
   });
 }
@@ -487,7 +803,7 @@ async function run() {
   setStatus(busy, false, true);
   try {
     state.doc = await getJSON(url);
-    state.hidden = new Set();
+    state.category = null;
     if (state.mode === "player") renderChips(); else $("chips").innerHTML = "";
     renderSections(); setStatus("");
     window.scrollTo({ top: 0, behavior: "smooth" });

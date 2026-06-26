@@ -46,11 +46,33 @@ def evalbar(plies: list[dict], moves: list[str]) -> dict:
     return {"type": "eval", "plies": plies, "moves": moves}
 
 
+def barstack(rows: list[dict], palette: dict, title: str = "") -> dict:
+    """Horizontal stacked-bar chart (one bar per row) with a shared legend.
+
+    rows:    [{"label":.., "segments":[{"name":.., "value":n}]}]
+    palette: {segment_name: css_color} — also fixes legend order.
+    """
+    return {"type": "barstack", "rows": rows, "palette": palette, "title": title}
+
+
 def board(fen: str, caption: str = "", lastmove: str | None = None,
           svg: str | None = None) -> dict:
     """A single position. `svg` is optional pre-rendered SVG (server-side)."""
     return {"type": "board", "fen": fen, "caption": caption,
             "lastmove": lastmove, "svg": svg}
+
+
+def review(positions: list[dict], moves: list[dict], orientation: str,
+           white: str, black: str) -> dict:
+    """Interactive move-by-move board explorer (web app only).
+
+    positions: per-position [{"fen":.., "cp":<white-pov>, "best":[{"uci","san","cp"}]}]
+               (len = plies + 1; `best` = engine's top moves at that position)
+    moves:     per-move [{"san","uci","label","cp_loss","wp_loss","best_san"}]
+    orientation: "white" | "black" — which way to face the board.
+    """
+    return {"type": "review", "positions": positions, "moves": moves,
+            "orientation": orientation, "white": white, "black": black}
 
 
 def ranking(title: str, rows: list[dict]) -> dict:

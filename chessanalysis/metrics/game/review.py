@@ -12,6 +12,38 @@ def _acc(a, side):
     return f"{v:.1f}%" if v is not None else "—"
 
 
+@metric("game", title="Board", order=5, needs=("engine",))
+def board_explorer(ctx):
+    """Interactive move-by-move board: navigate, see eval + top-3 engine moves."""
+    g, a = ctx.game, ctx.analysis
+    if len(a.fens) < 2:
+        return None
+
+    positions = []
+    for i, fen in enumerate(a.fens):
+        cp = a.evals[i] if i < len(a.evals) else 0
+        tops = a.top_moves[i] if i < len(a.top_moves) else []
+        best = []
+        try:
+            b = chess.Board(fen)
+            for t in tops[:3]:
+                try:
+                    mv = chess.Move.from_uci(t["uci"])
+                    best.append({"uci": t["uci"], "san": b.san(mv), "cp": t["cp"]})
+                except (ValueError, AssertionError):
+                    continue
+        except ValueError:
+            pass
+        positions.append({"fen": fen, "cp": cp, "best": best})
+
+    moves = [{
+        "san": m.san, "uci": m.move_uci, "label": m.label,
+        "cp_loss": m.cp_loss, "wp_loss": round(m.wp_loss, 1), "best_san": m.best_san,
+    } for m in a.moves]
+
+    return W.review(positions, moves, g.color, g.h("White"), g.h("Black"))
+
+
 @metric("game", title=None, order=10, needs=("engine",))
 def summary(ctx):
     g, a = ctx.game, ctx.analysis
@@ -50,18 +82,114 @@ def eval_graph(ctx):
     return W.evalbar(plies, [m.san for m in a.moves])
 
 
+# move-quality palette (also fixes legend order), shared with the chart below
+QUALITY_PALETTE = {
+    "best": "#3f9d5a", "good": "#9bbf6a", "inaccuracy": "#c69a16",
+    "mistake": "#e08a2b", "blunder": "#d0493b",
+}
+
+
+def _quality_counts(analysis, side):
+    """Per-side move counts split into best / good / inaccuracy / mistake / blunder.
+
+    "best" = the move matched the engine's top choice; the rest of the clean
+    moves are "good"; the three error tiers come straight from the labels.
+    """
+    counts = {k: 0 for k in QUALITY_PALETTE}
+    for m in analysis.moves:
+        if m.color != side:
+            continue
+        if m.label in ("inaccuracy", "mistake", "blunder"):
+            counts[m.label] += 1
+        elif m.best_san and m.san == m.best_san:
+            counts["best"] += 1
+        else:
+            counts["good"] += 1
+    return counts
+
+
 @metric("game", title="Move quality", order=30, needs=("engine",))
 def move_quality(ctx):
     a = ctx.analysis
+    # 1) visual breakdown of every move by quality, per side
+    rows = [{"label": side.title(),
+             "segments": [{"name": k, "value": v}
+                          for k, v in _quality_counts(a, side).items()]}
+            for side in ("white", "black")]
+    chart = W.barstack(rows, QUALITY_PALETTE, title="Every move, classified")
+    # 2) the accuracy / ACPL / error-count table
     cols = ["Side", "Accuracy", "ACPL", "Inaccuracies", "Mistakes", "Blunders"]
-    rows = []
+    table_rows = []
     for side in ("white", "black"):
         c = a.counts[side]
-        rows.append([
+        table_rows.append([
             side.title(), _acc(a, side), a.acpl.get(side),
             c["inaccuracy"], c["mistake"], c["blunder"],
         ])
-    return W.table(cols, rows)
+    return [chart, W.table(cols, table_rows)]
+
+
+# --- tactical misses vs. positional drift -----------------------------------
+# A tactical miss is one move that drops a lot at once (a missed forced line);
+# positional drift is a run of consecutive small losses — slow strategic decline.
+TACTICAL_CP = 150               # single-move centipawn loss = a tactical miss
+DRIFT_LO, DRIFT_HI = 15, 90     # per-move loss band that counts as "small"
+DRIFT_MIN = 4                   # this many small losses in a row = a drift episode
+
+
+def _drift_runs(side_moves):
+    """Maximal runs of consecutive small-loss moves (>= DRIFT_MIN long)."""
+    runs, cur = [], []
+    for m in side_moves:
+        if DRIFT_LO <= m.cp_loss <= DRIFT_HI:
+            cur.append(m)
+        else:
+            if len(cur) >= DRIFT_MIN:
+                runs.append(cur)
+            cur = []
+    if len(cur) >= DRIFT_MIN:
+        runs.append(cur)
+    return runs
+
+
+def _move_label(m):
+    return f"{(m.ply + 1) // 2}{'.' if m.ply % 2 else '…'}"
+
+
+@metric("game", title="Tactical vs positional", order=35, needs=("engine",))
+def error_profile(ctx):
+    a = ctx.analysis
+    if not a.moves:
+        return None
+
+    rows = []
+    for side in ("white", "black"):
+        sm = [m for m in a.moves if m.color == side]
+        tactical = [m for m in sm if m.cp_loss >= TACTICAL_CP]
+        runs = _drift_runs(sm)
+        longest = max((len(r) for r in runs), default=0)
+        rows.append([side.title(), len(tactical), len(runs), longest or "—"])
+    table = W.table(
+        ["Side", "Tactical misses", "Drift episodes", "Longest drift"], rows)
+
+    explain = W.text(
+        f"Tactical misses are single moves that lose ≥{TACTICAL_CP / 100:.1f} "
+        f"pawns at once (a missed forced sequence). Positional drift is "
+        f"{DRIFT_MIN}+ moves in a row each bleeding {DRIFT_LO}–{DRIFT_HI}cp — "
+        f"slow strategic decline rather than a single blunder.")
+
+    # narrative for the analysed player's own side
+    me = ctx.game.color
+    runs = _drift_runs([m for m in a.moves if m.color == me])
+    if runs:
+        spans = "; ".join(
+            f"{_move_label(r[0])}–{_move_label(r[-1])} "
+            f"(−{sum(m.cp_loss for m in r)}cp over {len(r)} moves)" for r in runs)
+        note = W.text(f"Your positional drift: {spans}.")
+    else:
+        note = W.text("No positional drift on your side — your inaccuracies were "
+                      "isolated rather than sustained.")
+    return [explain, table, note]
 
 
 @metric("game", title="Key moments", order=40, needs=("engine",))

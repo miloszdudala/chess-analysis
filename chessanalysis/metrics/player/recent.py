@@ -7,6 +7,6 @@ from ...registry import metric
 from ... import widgets as W
 
 
-@metric("player", title="Recent games", order=60)
+@metric("player", title="Recent games", order=70, category="Games")
 def recent_games(ctx):
     return W.recent()

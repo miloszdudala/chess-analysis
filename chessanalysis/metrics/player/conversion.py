@@ -7,6 +7,6 @@ from ...registry import metric
 from ... import widgets as W
 
 
-@metric("player", title="Conversion & stages", order=65)
+@metric("player", title="Conversion & stages", order=60, category="Conversion & endgame")
 def conversion_stages(ctx):
     return W.conversion()

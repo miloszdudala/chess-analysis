@@ -21,7 +21,7 @@ def _pct(n, t):
     return f"{round(100 * n / t)}%" if t else "—"
 
 
-@metric("player", title="By opponent strength", order=40)
+@metric("player", title="By opponent strength", order=30, category="Opponents")
 def by_opponent_strength(ctx):
     agg = {label: {"wdl": WDL(), "dsum": 0, "dn": 0} for label, _ in BUCKETS}
     prev = None
@@ -55,7 +55,7 @@ def by_opponent_strength(ctx):
     return W.table(["Opponent", "Games", "W", "D", "L", "Win%", "Avg Δ", ""], rows)
 
 
-@metric("player", title="Opponent strength by result", order=41)
+@metric("player", title="Opponent strength by result", order=31, category="Opponents")
 def strength_by_result(ctx):
     agg = {o: {"opp": [], "gap": []} for o in ("win", "draw", "loss")}
     for g in ctx.games:

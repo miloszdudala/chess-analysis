@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 class Section:
     title: str | None
     widgets: list[dict]
+    category: str | None = None   # UI grouping label (e.g. "Openings")
 
 
 @dataclass
@@ -23,14 +24,15 @@ class Document:
     meta: dict = field(default_factory=dict)
     sections: list[Section] = field(default_factory=list)
 
-    def add(self, title, widgets) -> None:
+    def add(self, title, widgets, category=None) -> None:
         if not widgets:
             return
         if isinstance(widgets, dict):
             widgets = [widgets]
         widgets = [w for w in widgets if w]
         if widgets:
-            self.sections.append(Section(title=title, widgets=widgets))
+            self.sections.append(
+                Section(title=title, widgets=widgets, category=category))
 
     def to_dict(self) -> dict:
         return {
@@ -39,7 +41,8 @@ class Document:
             "subtitle": self.subtitle,
             "meta": self.meta,
             "sections": [
-                {"title": s.title, "widgets": s.widgets} for s in self.sections
+                {"title": s.title, "widgets": s.widgets, "category": s.category}
+                for s in self.sections
             ],
         }
 

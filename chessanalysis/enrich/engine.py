@@ -78,6 +78,8 @@ class GameAnalysis:
     accuracy: dict = field(default_factory=dict)   # {"white":.., "black":..}
     acpl: dict = field(default_factory=dict)
     counts: dict = field(default_factory=dict)      # per side: inaccuracy/mistake/blunder
+    fens: list = field(default_factory=list)        # FEN per position, len = plies + 1
+    top_moves: list = field(default_factory=list)   # per position: [{"uci","cp"},..] (white POV)
 
     def blunders(self, color: str | None = None) -> list[MoveEval]:
         return [m for m in self.moves
@@ -124,37 +126,48 @@ def _raw_evals(pgn_text: str, depth: int, engine) -> dict:
     board, moves = _read_board_moves(pgn_text)
     if board is None:
         return {"evals": [], "best_uci": [], "moves_san": [], "moves_uci": [],
-                "fens": []}
+                "fens": [], "top_moves": []}
 
-    evals, best_uci, moves_san, moves_uci, fens = [], [], [], [], []
+    evals, best_uci, moves_san, moves_uci, fens, top_moves = [], [], [], [], [], []
 
-    def eval_position(b: chess.Board) -> tuple[int, str]:
+    def eval_position(b: chess.Board) -> tuple[int, str, list]:
+        """Returns (white-POV cp, best move uci, top-3 [{"uci","cp"}])."""
         if b.is_game_over():
             if b.is_checkmate():
                 # side to move is mated
                 cp = -MATE_CP if b.turn == chess.WHITE else MATE_CP
             else:
                 cp = 0  # stalemate / draw
-            return cp, ""
-        info = engine.analyse(b, chess.engine.Limit(depth=depth))
-        cp = info["score"].white().score(mate_score=MATE_CP)
-        pv = info.get("pv")
-        return cp, (pv[0].uci() if pv else "")
+            return cp, "", []
+        infos = engine.analyse(b, chess.engine.Limit(depth=depth), multipv=3)
+        if isinstance(infos, dict):              # engine without MultiPV support
+            infos = [infos]
+        top = []
+        for it in infos:
+            pv = it.get("pv")
+            if not pv:
+                continue
+            top.append({"uci": pv[0].uci(),
+                        "cp": it["score"].white().score(mate_score=MATE_CP)})
+        cp = top[0]["cp"] if top else infos[0]["score"].white().score(mate_score=MATE_CP)
+        return cp, (top[0]["uci"] if top else ""), top
 
     for mv in moves:
-        cp, best = eval_position(board)
+        cp, best, top = eval_position(board)
         evals.append(cp)
         best_uci.append(best)
+        top_moves.append(top)
         fens.append(board.fen())
         moves_san.append(board.san(mv))
         moves_uci.append(mv.uci())
         board.push(mv)
     # final position
-    cp, _ = eval_position(board)
+    cp, _, top = eval_position(board)
     evals.append(cp)
+    top_moves.append(top)
     fens.append(board.fen())
     return {"evals": evals, "best_uci": best_uci, "moves_san": moves_san,
-            "moves_uci": moves_uci, "fens": fens}
+            "moves_uci": moves_uci, "fens": fens, "top_moves": top_moves}
 
 
 def _derive(raw: dict, depth: int, engine_name: str) -> GameAnalysis:
@@ -213,7 +226,7 @@ def _derive(raw: dict, depth: int, engine_name: str) -> GameAnalysis:
     acpl = {c: round(cpl_sum[c] / n[c]) if n[c] else None for c in n}
     return GameAnalysis(depth=depth, engine_name=engine_name, evals=evals,
                         moves=move_evals, accuracy=accuracy, acpl=acpl,
-                        counts=counts)
+                        counts=counts, fens=fens, top_moves=raw.get("top_moves", []))
 
 
 def analyse_game(game, depth: int | None = None, engine=None) -> GameAnalysis:
@@ -222,7 +235,9 @@ def analyse_game(game, depth: int | None = None, engine=None) -> GameAnalysis:
         depth = int(config.get("ENGINE_DEPTH", "15"))
 
     cached = cache.load("engine", f"{game.game_id}_d{depth}")
-    if cached and cached.get("evals"):
+    # `top_moves` was added later; recompute caches that predate it so the
+    # board explorer always has engine arrows.
+    if cached and cached.get("evals") and cached.get("top_moves"):
         return _derive(cached, depth, cached.get("engine_name", "cache"))
 
     own_engine = engine is None

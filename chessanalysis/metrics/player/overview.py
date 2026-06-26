@@ -4,7 +4,7 @@ from ... import widgets as W
 from ...util import WDL
 
 
-@metric("player", title="Summary", order=10)
+@metric("player", title="Summary", order=10, category="Overview")
 def summary(ctx):
     rec = WDL()
     for g in ctx.games:
@@ -21,7 +21,7 @@ def summary(ctx):
     ])
 
 
-@metric("player", title="Rating", order=15)
+@metric("player", title="Rating", order=15, category="Overview")
 def rating_trend(ctx):
     pts = [{"x": g.date, "y": g.user_elo}
            for g in ctx.games if g.user_elo]

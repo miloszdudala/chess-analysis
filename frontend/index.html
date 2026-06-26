@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chess Analyzer</title>
+<link rel="stylesheet" href="/style.css">
+<style>
+  /* App chrome (widget styles come from /style.css) */
+  body { padding-top: 0; }
+  header.app { position: sticky; top: 0; z-index: 5; background: #161512ee;
+    backdrop-filter: blur(8px); border-bottom: 1px solid #ffffff14;
+    padding: 1rem; margin-bottom: 1.5rem; }
+  .appbar { max-width: 920px; margin: 0 auto; display: flex; align-items: center;
+    gap: 1rem; flex-wrap: wrap; }
+  .brand { font-size: 1.2rem; font-weight: 700; }
+  .tabs { display: flex; gap: .4rem; }
+  .tab { background: #262421; color: var(--mut); border: 1px solid transparent;
+    border-radius: 8px; padding: .4rem .9rem; cursor: pointer; font: inherit;
+    text-transform: capitalize; }
+  .tab:hover { color: var(--txt); }
+  .tab.active { background: var(--accent); color: #08120a; font-weight: 600; }
+  .controls { max-width: 920px; margin: 0 auto 1rem; display: flex; gap: .6rem;
+    align-items: end; flex-wrap: wrap; }
+  .field { display: flex; flex-direction: column; gap: .25rem; }
+  .field label { font-size: .72rem; text-transform: uppercase; letter-spacing: .04em;
+    color: var(--mut); }
+  .field input, .field select { background: #262421; color: var(--txt);
+    border: 1px solid #ffffff1f; border-radius: 8px; padding: .5rem .6rem;
+    font: inherit; min-width: 12rem; }
+  .field select { min-width: 22rem; }
+  button.go { background: var(--accent); color: #08120a; border: 0; font-weight: 600;
+    border-radius: 8px; padding: .55rem 1.2rem; cursor: pointer; font: inherit; }
+  button.go:disabled { opacity: .5; cursor: default; }
+  .status { max-width: 920px; margin: 0 auto; color: var(--mut); min-height: 1.2rem; }
+  .status.err { color: var(--l); }
+  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid #ffffff33;
+    border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite;
+    vertical-align: -2px; margin-right: .5rem; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #result h1 { font-size: 1.5rem; margin: .5rem 0 .2rem; }
+</style>
+</head>
+<body>
+<header class="app">
+  <div class="appbar">
+    <span class="brand">♟ Chess Analyzer</span>
+    <div class="tabs" id="tabs"></div>
+  </div>
+</header>
+
+<div class="controls" id="controls"></div>
+<div class="status" id="status"></div>
+
+<div class="wrap">
+  <div id="result"></div>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>

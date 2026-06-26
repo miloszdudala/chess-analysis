@@ -1,12 +1,21 @@
-"""Chess game analysis toolkit.
+"""Chess game analysis toolkit — pluggable along three axes.
 
-Pluggable architecture:
-  * model.py     — PGN parsing into rich, perspective-bound Game objects
-  * registry.py  — @register decorator; stats self-register
-  * util.py      — aggregation helpers (tally, WDL)
-  * render.py    — HTML widgets (cards, tables, bars, sparklines, page shell)
-  * stats/       — one file per stat block; auto-discovered at import
+Layers:
+  * model.py        PGN -> perspective-bound Game objects (+ parsed moves/clocks)
+  * contexts.py     per-mode input shapes (PlayerContext, GameContext, ...)
+  * enrich/         derived data (Stockfish engine analysis), cached to disk
+  * registry.py     @metric decorator; metrics self-register, tagged by scope
+  * metrics/        compute-only units returning widget data — auto-discovered
+  * widgets.py      the widget vocabulary (the backend<->frontend data contract)
+  * document.py     a mode's output: ordered widgets + metadata (-> JSON)
+  * modes/          build a context, run its scope's metrics, assemble a Document
+  * render_html.py  default renderer: Document -> static HTML (JSON works too)
 
-To add a new stat: drop a file in stats/ with a @register(...) function that
-takes a list[Game] and returns an HTML string. Nothing else to wire up.
+Three independent extension axes — each is "drop one file":
+  1. New stat   -> add a metrics/<scope>/ file (@metric), pick an existing widget
+  2. New mode   -> add a modes/ file (@mode) + a Context; reuses that scope's metrics
+  3. New chart  -> add a widgets.py builder + a render_html handler (+ frontend later)
+
+The discipline: metrics compute (never render); modes shape data (never compute);
+renderers render (never compute).
 """

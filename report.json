@@ -1,0 +1,382 @@
+{
+  "mode": "player",
+  "title": "\u265f md-7777",
+  "subtitle": "125 games analysed",
+  "meta": {
+    "player": "md-7777",
+    "games": 125
+  },
+  "sections": [
+    {
+      "title": null,
+      "widgets": [
+        {
+          "type": "cards",
+          "items": [
+            {
+              "value": 64,
+              "label": "Wins"
+            },
+            {
+              "value": 14,
+              "label": "Draws"
+            },
+            {
+              "value": 47,
+              "label": "Losses"
+            },
+            {
+              "value": "51%",
+              "label": "Win rate"
+            },
+            {
+              "value": 2155,
+              "label": "Latest Elo"
+            },
+            {
+              "value": 2164,
+              "label": "Peak Elo"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Rating trend",
+      "widgets": [
+        {
+          "type": "line",
+          "series": [
+            {
+              "name": "md-7777",
+              "points": [
+                1624,
+                1746,
+                1768,
+                1821,
+                1866,
+                1915,
+                1948,
+                1958,
+                1973,
+                1983,
+                1982,
+                1995,
+                1986,
+                1994,
+                1986,
+                1986,
+                2005,
+                1997,
+                2004,
+                1996,
+                1988,
+                1981,
+                1989,
+                1998,
+                1991,
+                1983,
+                1991,
+                1993,
+                1985,
+                1986,
+                2004,
+                2012,
+                2015,
+                2023,
+                2026,
+                2026,
+                2018,
+                2010,
+                2018,
+                2026,
+                2033,
+                2041,
+                2051,
+                2061,
+                2071,
+                2064,
+                2073,
+                2080,
+                2076,
+                2069,
+                2079,
+                2087,
+                2095,
+                2088,
+                2086,
+                2080,
+                2073,
+                2081,
+                2089,
+                2090,
+                2098,
+                2090,
+                2098,
+                2106,
+                2098,
+                2106,
+                2114,
+                2122,
+                2114,
+                2106,
+                2114,
+                2108,
+                2116,
+                2108,
+                2109,
+                2117,
+                2117,
+                2109,
+                2111,
+                2103,
+                2112,
+                2112,
+                2104,
+                2115,
+                2118,
+                2126,
+                2125,
+                2117,
+                2112,
+                2106,
+                2098,
+                2091,
+                2101,
+                2093,
+                2101,
+                2092,
+                2100,
+                2107,
+                2115,
+                2115,
+                2123,
+                2131,
+                2131,
+                2139,
+                2130,
+                2122,
+                2132,
+                2140,
+                2140,
+                2148,
+                2156,
+                2148,
+                2156,
+                2164,
+                2156,
+                2148,
+                2140,
+                2148,
+                2140,
+                2131,
+                2123,
+                2131,
+                2139,
+                2147,
+                2155
+              ]
+            }
+          ],
+          "y_label": "Elo",
+          "x_label": ""
+        }
+      ]
+    },
+    {
+      "title": "By color",
+      "widgets": [
+        {
+          "type": "wdl_table",
+          "label_col": "Color",
+          "rows": [
+            {
+              "label": "White",
+              "win": 36,
+              "draw": 9,
+              "loss": 19
+            },
+            {
+              "label": "Black",
+              "win": 28,
+              "draw": 5,
+              "loss": 28
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "By time control",
+      "widgets": [
+        {
+          "type": "wdl_table",
+          "label_col": "Format",
+          "rows": [
+            {
+              "label": "rapid",
+              "win": 64,
+              "draw": 14,
+              "loss": 47
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Top openings",
+      "widgets": [
+        {
+          "type": "wdl_table",
+          "label_col": "Opening",
+          "rows": [
+            {
+              "label": "French Defense Normal Variation",
+              "win": 3,
+              "draw": 0,
+              "loss": 0
+            },
+            {
+              "label": "Giuoco Piano Game Main Line 4...d6 5.d4",
+              "win": 0,
+              "draw": 1,
+              "loss": 1
+            },
+            {
+              "label": "Slav Defense 3.Nc3 Nf6 4.Bg5 e6",
+              "win": 1,
+              "draw": 1,
+              "loss": 0
+            },
+            {
+              "label": "Italian Game Two Knights Defense 4.O O Nxe4",
+              "win": 2,
+              "draw": 0,
+              "loss": 0
+            },
+            {
+              "label": "Closed Sicilian Defense Traditional Line 3.Nf3 g6",
+              "win": 1,
+              "draw": 0,
+              "loss": 1
+            },
+            {
+              "label": "Giuoco Piano Game Giuoco Pianissimo Italian Four Knights Variation 5...h6",
+              "win": 0,
+              "draw": 0,
+              "loss": 2
+            },
+            {
+              "label": "Slav Defense 3.Nc3 Nf6 4.e3 e6",
+              "win": 1,
+              "draw": 0,
+              "loss": 1
+            },
+            {
+              "label": "Ruy Lopez Opening Old Steinitz Defense 4.d4 exd4 5.Nxd4 Bd7",
+              "win": 1,
+              "draw": 0,
+              "loss": 1
+            },
+            {
+              "label": "Giuoco Piano Game 4.O O Nf6 5.d3 h6",
+              "win": 1,
+              "draw": 1,
+              "loss": 0
+            },
+            {
+              "label": "Petrovs Defense Classical Variation",
+              "win": 1,
+              "draw": 0,
+              "loss": 1
+            },
+            {
+              "label": "Alapin Sicilian Defense Barmen Defense",
+              "win": 1,
+              "draw": 0,
+              "loss": 1
+            },
+            {
+              "label": "Four Knights Game",
+              "win": 1,
+              "draw": 0,
+              "loss": 1
+            },
+            {
+              "label": "Italian Game Hungarian Defense 4.d4 exd4",
+              "win": 1,
+              "draw": 0,
+              "loss": 0
+            },
+            {
+              "label": "Giuoco Piano Game 4.O O d6 5.c3",
+              "win": 1,
+              "draw": 0,
+              "loss": 0
+            },
+            {
+              "label": "Ruy Lopez Opening Morphy Defense Neo Arkhangelsk Variation 6.c3 b5 7.Bc2 d6",
+              "win": 0,
+              "draw": 1,
+              "loss": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Most-played opponents",
+      "widgets": [
+        {
+          "type": "table",
+          "columns": [
+            "Opponent",
+            "Games"
+          ],
+          "rows": [
+            [
+              "art1vandelay",
+              2
+            ],
+            [
+              "caadcwd",
+              1
+            ],
+            [
+              "brolivia2",
+              1
+            ],
+            [
+              "ahmed_gamal9505",
+              1
+            ],
+            [
+              "winhlazaw",
+              1
+            ],
+            [
+              "kara3407",
+              1
+            ],
+            [
+              "zub61",
+              1
+            ],
+            [
+              "kokorin-miron",
+              1
+            ],
+            [
+              "adkasuhc",
+              1
+            ],
+            [
+              "cruzalex",
+              1
+            ]
+          ]
+        }
+      ]
+    }
+  ]
+}

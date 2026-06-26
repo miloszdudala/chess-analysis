@@ -20,7 +20,13 @@ def _parse_env_file(path: str) -> dict:
             if not line or line.startswith("#") or "=" not in line:
                 continue
             key, _, val = line.partition("=")
-            val = val.strip().strip('"').strip("'")
+            val = val.strip()
+            if val[:1] in ("'", '"'):                 # quoted: keep as-is inside quotes
+                q = val[0]
+                end = val.find(q, 1)
+                val = val[1:end] if end > 0 else val[1:]
+            elif "#" in val:                          # strip inline comment
+                val = val.split("#", 1)[0].strip()
             values[key.strip()] = val
     return values
 

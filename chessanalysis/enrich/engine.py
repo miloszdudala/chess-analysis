@@ -87,6 +87,29 @@ class GameAnalysis:
         flagged = [m for m in self.moves if m.label in ("blunder", "mistake")]
         return sorted(flagged, key=lambda m: -m.wp_loss)[:n]
 
+    def decisive(self, cp: int = 200) -> dict:
+        """First moment the eval crosses +/-cp, which side, and whether it held.
+
+        held = the advantage never dropped back below the threshold afterwards
+        (it stayed at least that decisive, or grew). Returns reached=False if the
+        game never became decisive by this threshold.
+        """
+        evals = self.evals
+        first, side = None, None
+        for i, e in enumerate(evals):
+            if e >= cp:
+                first, side = i, "white"
+                break
+            if e <= -cp:
+                first, side = i, "black"
+                break
+        if first is None:
+            return {"reached": False, "cp": cp}
+        rest = evals[first:]
+        held = (min(rest) >= cp) if side == "white" else (max(rest) <= -cp)
+        return {"reached": True, "cp": cp, "ply": first,
+                "move_no": (first + 1) // 2, "side": side, "held": held}
+
 
 def _read_board_moves(pgn_text: str):
     game = chess.pgn.read_game(io.StringIO(pgn_text))

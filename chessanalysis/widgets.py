@@ -68,6 +68,18 @@ def movetree(children: list[dict]) -> dict:
     return {"type": "movetree", "children": children}
 
 
+def recent() -> dict:
+    """Placeholder for the recent-games list — the web app fetches & analyses
+    it lazily (engine-backed) via /api/recent with a 5/10/20/All selector."""
+    return {"type": "recent"}
+
+
+def conversion() -> dict:
+    """Placeholder for conversion/stage analysis — fetched lazily (engine-backed)
+    via /api/conversion over all games of the chosen format."""
+    return {"type": "conversion"}
+
+
 def group(title: str, widgets: list[dict], layout: str = "row") -> dict:
     """A container that lays out child widgets in a row or grid."""
     return {"type": "group", "title": title, "layout": layout, "widgets": widgets}

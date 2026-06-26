@@ -15,11 +15,11 @@ import time
 import urllib.error
 import urllib.request
 
-from chessanalysis import config
+from chessanalysis import cache, config
 
 API = "https://api.chess.com/pub"
 # Chess.com blocks requests without a real-looking User-Agent.
-HEADERS = {"User-Agent": "chess-analyzer (personal game-analysis tool)"}
+HEADERS = {"User-Agent": "personal game storage"}
 
 
 def get_json(url):
@@ -60,6 +60,60 @@ def download_month(archive_url, out_dir, username):
     return saved
 
 
+def scrape(username, out_dir="games", year=None, month=None, log=print):
+    """Download games for `username` into `out_dir`. Returns a summary dict.
+
+    Reusable by both the CLI and the web app's Sync button. Past months are
+    recorded in a manifest and skipped on later runs (no API call); only the
+    current month is re-checked. A date filter bypasses the manifest.
+    """
+    username = username.lower()
+    os.makedirs(out_dir, exist_ok=True)
+
+    try:
+        archives = list_archives(username)
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            raise ValueError(f"No such Chess.com account: '{username}'")
+        raise
+    if not archives:
+        return {"new": 0, "skipped": 0, "requests": 1}
+
+    filtered = bool(year)
+    if year:
+        archives = [a for a in archives if f"/{year:04d}/" in a]
+        if month:
+            sel = f"/{year:04d}/{month:02d}"
+            archives = [a for a in archives if a.rstrip("/").endswith(sel)]
+
+    manifest = cache.load("scrape", username) or {"completed": []}
+    completed = set(manifest.get("completed", []))
+    latest = archives[-1] if archives else None
+
+    total = skipped = requests = 0
+    requests += 1  # the archives list
+    for url in archives:
+        if not filtered and url != latest and url in completed:
+            skipped += 1
+            continue
+        try:
+            n = download_month(url, out_dir, username)
+            requests += 1
+            total += n
+            label = "/".join(url.rstrip("/").split("/")[-2:])
+            log(f"  {label}: +{n} new games")
+            if not filtered and url != latest:
+                completed.add(url)        # past month: fetched once, never again
+        except urllib.error.HTTPError as e:
+            log(f"  {url}: error {e.code}")
+        time.sleep(0.3)  # be polite to the API
+
+    if not filtered:
+        cache.save("scrape", username, {"completed": sorted(completed)})
+
+    return {"new": total, "skipped": skipped, "requests": requests}
+
+
 def main():
     ap = argparse.ArgumentParser(description="Scrape Chess.com games to PGN.")
     ap.add_argument("username", nargs="?", default=config.get("CHESS_USERNAME"),
@@ -72,38 +126,13 @@ def main():
 
     if not args.username:
         sys.exit("No username given. Pass one, or set CHESS_USERNAME in .env.")
-    username = args.username.lower()
-    os.makedirs(args.out, exist_ok=True)
-
     try:
-        archives = list_archives(username)
-    except urllib.error.HTTPError as e:
-        if e.code == 404:
-            sys.exit(f"No such Chess.com account: '{username}'")
-        raise
+        res = scrape(args.username, args.out, args.year, args.month)
+    except ValueError as e:
+        sys.exit(str(e))
 
-    if not archives:
-        sys.exit(f"No games found for '{username}'.")
-
-    if args.year:
-        sel = f"/{args.year:04d}/"
-        archives = [a for a in archives if sel in a]
-        if args.month:
-            sel = f"/{args.year:04d}/{args.month:02d}"
-            archives = [a for a in archives if a.rstrip("/").endswith(sel)]
-
-    total = 0
-    for url in archives:
-        try:
-            n = download_month(url, args.out, username)
-            total += n
-            label = "/".join(url.rstrip("/").split("/")[-2:])
-            print(f"  {label}: +{n} new games")
-        except urllib.error.HTTPError as e:
-            print(f"  {url}: error {e.code}", file=sys.stderr)
-        time.sleep(0.3)  # be polite to the API
-
-    print(f"\nDone. {total} new games saved to '{args.out}/'.")
+    extra = f" ({res['skipped']} months already complete, skipped)" if res["skipped"] else ""
+    print(f"\nDone. {res['new']} new games saved to '{args.out}/'{extra}.")
 
 
 if __name__ == "__main__":

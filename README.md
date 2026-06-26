@@ -31,12 +31,19 @@ python3 scraper.py
 In the browser, pick a tab:
 
 - **Player report** — choose a format (bullet / blitz / rapid) first, then pick
-  which stats to show. Includes a zoomable rating chart (drag or scroll to zoom,
-  double-click to reset, hover for date / rating / change) and opponent rankings
-  for the games you win, lose, and draw.
+  which stats to show. Includes a zoomable rating chart (drag/scroll to zoom,
+  double-click to reset, hover for date / rating / change; Game / Day / Month
+  grouping), opening **move trees** per color, opponent-strength aggregates, and
+  a **Recent games** list (5 / 10 / 20 / All) — each engine-analysed with
+  accuracy, blunders, and the conversion stat; click a row to open its review.
 - **Game review** — pick a game and depth; Stockfish reports accuracy, an eval
-  graph, and annotated key moments.
+  graph, annotated key moments, and the **conversion** stat (when the eval first
+  crossed ±X and whether it held).
 - **Compare** — two players side by side.
+
+The Chess.com API is only ever called by `scraper.py`. Past months are recorded
+in a manifest and skipped on later runs — only the current month is re-checked —
+so games are effectively downloaded once.
 
 ## CLI (static HTML + JSON)
 

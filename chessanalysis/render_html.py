@@ -106,9 +106,10 @@ def _eval(w) -> str:
     # white-territory polygon: under the curve down to the bottom edge
     area = (f"0,100 " + " ".join(f"{x:.2f},{y:.2f}" for x, y in curve) + " 100,100")
     dots = "".join(
-        f'<circle cx="{xy(i, p["cp"])[0]:.2f}" cy="{xy(i, p["cp"])[1]:.2f}" r="1.4" '
+        f'<circle cx="{xy(i, p["cp"])[0]:.2f}" cy="{xy(i, p["cp"])[1]:.2f}" r="1.6" '
         f'class="m-{p.get("label","ok")}"/>'
-        for i, p in enumerate(plies) if p.get("label") in ("blunder", "mistake"))
+        for i, p in enumerate(plies)
+        if p.get("label") in ("blunder", "mistake", "inaccuracy"))
     return (f'<svg viewBox="0 0 100 100" preserveAspectRatio="none" class="evalg">'
             f'<rect width="100" height="100" class="ev-black"/>'
             f'<polygon points="{area}" class="ev-white"/>'
@@ -158,6 +159,17 @@ def _group(w) -> str:
     return f'{title}<div class="group group-{w.get("layout","row")}">{inner}</div>'
 
 
+def _recent(w) -> str:
+    # Engine-backed and interactive; only meaningful in the web app.
+    return ('<p class="text">Recent-game analysis is interactive — '
+            'open the web app (<code>python webapp.py</code>) to browse it.</p>')
+
+
+def _conversion(w) -> str:
+    return ('<p class="text">Conversion &amp; stage analysis is engine-backed — '
+            'open the web app (<code>python webapp.py</code>) to view it.</p>')
+
+
 def _text(w) -> str:
     return f'<p class="text">{w["body"]}</p>'
 
@@ -165,7 +177,8 @@ def _text(w) -> str:
 _HANDLERS = {
     "cards": _cards, "table": _table, "wdl_table": _wdl_table, "line": _line,
     "eval": _eval, "board": _board, "group": _group, "ranking": _ranking,
-    "movetree": _movetree, "text": _text,
+    "movetree": _movetree, "recent": _recent, "conversion": _conversion,
+    "text": _text,
 }
 
 
@@ -254,17 +267,26 @@ _CSS = """
   .tree .ct { color:var(--mut); font-size:.8rem; font-variant-numeric:tabular-nums; min-width:2rem; }
   .tree .wr { color:var(--mut); font-size:.8rem; margin-left:auto; font-variant-numeric:tabular-nums; }
   .tree .bar { width:90px; min-width:90px; flex:0 0 auto; }
+  /* recent games (web app) */
+  .recent-tbl tr.rrow { cursor:pointer; }
+  .recent-tbl tr.rrow:hover td { background:var(--bg); }
+  .recent-tbl td.res-win { color:var(--win); font-weight:600; }
+  .recent-tbl td.res-loss { color:var(--loss); font-weight:600; }
+  .conv-held { color:var(--win); } .conv-lost { color:var(--loss); }
   .chart-tip { position:absolute; pointer-events:none; background:var(--ink); color:#fff;
                padding:.4rem .55rem; border-radius:7px; font-size:.75rem; white-space:nowrap;
                transform:translate(-50%,-130%); opacity:0; transition:opacity .07s; z-index:4; }
   .chart-tip b { font-family:var(--mono); }
   .chart-tip .up { color:#7fd3a8; } .chart-tip .dn { color:#f0a08c; }
-  /* static eval graph (game-review HTML) */
+  /* eval graph — static (.evalg) and interactive (.evalc) */
   .evalg { width:100%; height:120px; border-radius:10px; background:#2c2a26; }
-  .ev-black { fill:#3a3835; } .ev-white { fill:#e7e3da; }
-  .ev-mid { stroke:#0006; stroke-width:.5; vector-effect:non-scaling-stroke; }
-  .ev-line { fill:none; stroke:#1116; stroke-width:1; vector-effect:non-scaling-stroke; }
+  .eval-host { position:relative; }
+  svg.evalc { display:block; width:100%; height:auto; border-radius:10px; }
+  .ev-black { fill:#2c2a26; } .ev-white { fill:#e7e3da; }
+  .ev-mid { stroke:#ffffff33; stroke-width:1; vector-effect:non-scaling-stroke; }
+  .ev-line { fill:none; stroke:#888; stroke-width:1; vector-effect:non-scaling-stroke; }
   circle.m-blunder { fill:var(--loss); } circle.m-mistake { fill:#d99a3a; }
+  circle.m-inaccuracy { fill:#e0b020; }
   .spark { width:100%; height:64px; }
   .spark polyline { fill:none; stroke:var(--accent); stroke-width:1.5; vector-effect:non-scaling-stroke; }
   figure.board { margin:0; background:var(--panel); border:1px solid var(--line);

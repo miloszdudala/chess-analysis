@@ -69,13 +69,32 @@ const WIDGETS = {
 
   text: (w) => `<p class="text">${esc(w.body)}</p>`,
 
+  board: (w) => `<figure class="board">${w.svg || ""}` +
+    (w.caption ? `<figcaption>${esc(w.caption)}</figcaption>` : "") + `</figure>`,
+
+  eval: (w) => {
+    const id = "eval-" + Math.random().toString(36).slice(2);
+    pendingEvals.push({ id, plies: w.plies, moves: w.moves });
+    return `<div class="eval-host" id="${id}"></div>`;
+  },
+
   movetree: (w) => `<div class="tree">${w.children.map(treeNode).join("")}</div>`,
 
-  // line is special: returns a placeholder; the chart is built after insertion.
+  // line & recent return placeholders; built/loaded after insertion.
   line: (w) => {
     const id = "chart-" + Math.random().toString(36).slice(2);
     pendingCharts.push({ id, series: w.series });
     return `<div class="chart-host" id="${id}"></div>`;
+  },
+  recent: () => {
+    const id = "recent-" + Math.random().toString(36).slice(2);
+    pendingRecents.push(id);
+    return `<div id="${id}"></div>`;
+  },
+  conversion: () => {
+    const id = "conv-" + Math.random().toString(36).slice(2);
+    pendingConversions.push(id);
+    return `<div id="${id}"></div>`;
   },
 };
 
@@ -94,6 +113,9 @@ function treeNode(node) {
 }
 
 let pendingCharts = [];
+let pendingRecents = [];
+let pendingConversions = [];
+let pendingEvals = [];
 function renderWidget(w) {
   const fn = WIDGETS[w.type];
   return fn ? fn(w) : `<!-- ${w.type} -->`;
@@ -214,6 +236,139 @@ function aggregate(points, gran) {
   return [...m.values()];
 }
 
+// ------------------------------------------------------------- eval chart
+
+const DOT = { inaccuracy: "#e0b020", mistake: "#e08a2b", blunder: "#d0493b" };
+
+function buildEvalChart(host, plies, moves) {
+  if (!plies || plies.length < 2) return;
+  const W = host.clientWidth || 880, H = 200;
+  const M = { l: 8, r: 8, t: 8, b: 8 };
+  const pw = W - M.l - M.r, ph = H - M.t - M.b;
+  const n = plies.length, CLAMP = 1000;
+  const clamp = (c) => Math.max(-CLAMP, Math.min(CLAMP, c));
+  const xPix = (i) => M.l + (i / (n - 1)) * pw;
+  const yPix = (c) => M.t + ph * (0.5 - clamp(c) / (2 * CLAMP));
+
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.classList.add("evalc");   // uniform scaling keeps the dots round & responsive
+  const tip = document.createElement("div"); tip.className = "chart-tip";
+  host.appendChild(svg); host.appendChild(tip);
+
+  const curve = plies.map((p, i) => `${xPix(i).toFixed(1)},${yPix(p.cp).toFixed(1)}`);
+  const base = (M.t + ph).toFixed(1);
+  const dots = plies.map((p, i) => DOT[p.label]
+    ? `<circle cx="${xPix(i).toFixed(1)}" cy="${yPix(p.cp).toFixed(1)}" r="3.2" fill="${DOT[p.label]}"/>`
+    : "").join("");
+
+  svg.innerHTML =
+    `<rect width="${W}" height="${H}" class="ev-black"/>` +
+    `<polygon class="ev-white" points="${M.l},${base} ${curve.join(" ")} ${(M.l + pw).toFixed(1)},${base}"/>` +
+    `<line class="ev-mid" x1="${M.l}" y1="${(M.t + ph / 2).toFixed(1)}" x2="${M.l + pw}" y2="${(M.t + ph / 2).toFixed(1)}"/>` +
+    `<polyline class="ev-line" points="${curve.join(" ")}"/>` + dots +
+    `<g id="g" style="display:none"><line class="chart-guide" y1="${M.t}" y2="${M.t + ph}"/></g>` +
+    `<rect id="ov" x="0" y="0" width="${W}" height="${H}" fill="transparent"/>`;
+
+  const ov = svg.querySelector("#ov"), g = svg.querySelector("#g");
+  const gl = g.querySelector("line");
+  ov.onmousemove = (e) => {
+    const r = svg.getBoundingClientRect();
+    const px = (e.clientX - r.left) * (W / r.width);
+    let i = Math.round(((px - M.l) / pw) * (n - 1));
+    i = Math.max(0, Math.min(n - 1, i));
+    const p = plies[i], x = xPix(i);
+    g.style.display = ""; gl.setAttribute("x1", x); gl.setAttribute("x2", x);
+    const moveNo = Math.ceil(i / 2);
+    const san = i > 0 && moves[i - 1] ? moves[i - 1] : "start";
+    const ev = (p.cp / 100).toFixed(1);
+    const evTxt = p.cp > 0 ? "+" + ev : ev;
+    const lab = p.label && p.label !== "ok" ? ` · <span style="color:${DOT[p.label]}">${p.label}</span>` : "";
+    tip.innerHTML = `${moveNo ? moveNo + "." : ""} ${esc(san)} · <b>${evTxt}</b>${lab}`;
+    tip.style.left = (x * (r.width / W)) + "px";
+    tip.style.top = (yPix(p.cp) * (r.height / H)) + "px";
+    tip.style.opacity = 1;
+  };
+  ov.onmouseleave = () => { tip.style.opacity = 0; g.style.display = "none"; };
+}
+
+// ------------------------------------------------------------- recent games
+
+function initRecent(host) {
+  let n = 10;
+  const bar = document.createElement("div"); bar.className = "chart-toolbar";
+  const body = document.createElement("div");
+  [["5", 5], ["10", 10], ["20", 20], ["All", 0]].forEach(([lbl, val]) => {
+    const b = document.createElement("button");
+    b.className = "gbtn" + (val === n ? " on" : "");
+    b.textContent = lbl;
+    b.onclick = () => { n = val; [...bar.children].forEach((c) => c.classList.toggle("on", c === b)); load(); };
+    bar.appendChild(b);
+  });
+  host.appendChild(bar); host.appendChild(body);
+
+  async function load() {
+    body.innerHTML = `<p class="text"><span class="spinner"></span>Analysing games… first run can take a while (results are cached).</p>`;
+    try {
+      const meta = state.doc.meta;
+      const d = await getJSON(`/api/recent?user=${encodeURIComponent(meta.player)}` +
+        `&format=${meta.format || ""}&n=${n}`);
+      renderRecent(body, d);
+    } catch (e) {
+      body.innerHTML = `<p class="text" style="color:var(--loss)">${esc(e.message)}</p>`;
+    }
+  }
+  load();
+}
+
+function renderRecent(body, d) {
+  const thr = (d.threshold / 100).toFixed(1);
+  const cols = ["", "Date", "Opponent", "Result", "Accuracy", "Blunders", `Conversion (±${thr})`];
+  const head = cols.map((c) => `<th>${esc(c)}</th>`).join("");
+  const rows = d.games.map((g) => {
+    const res = g.outcome === "win" ? "✓" : g.outcome === "loss" ? "✗" : "=";
+    const resCls = g.outcome === "win" ? "res-win" : g.outcome === "loss" ? "res-loss" : "";
+    const acc = g.accuracy != null ? Math.round(g.accuracy) + "%" : "—";
+    let conv = "—";
+    if (g.decisive) {
+      const cls = g.decisive.held ? "conv-held" : "conv-lost";
+      const tick = g.decisive.held ? "✓ held" : "✗ lost";
+      conv = `move ${g.decisive.move} <span class="${cls}">${tick}</span>`;
+    }
+    return `<tr class="rrow" data-id="${g.id}">` +
+      `<td class="${resCls}">${res}</td><td>${esc(g.date)}</td>` +
+      `<td>${esc(g.opponent)} (${g.opp_elo || "?"})</td><td>${g.result}</td>` +
+      `<td>${acc}</td><td>${g.blunders}</td><td>${conv}</td></tr>`;
+  }).join("");
+  body.innerHTML = `<table class="recent-tbl"><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table>`;
+  body.querySelectorAll(".rrow").forEach((tr) => { tr.onclick = () => gotoGame(tr.dataset.id); });
+}
+
+async function initConversion(host) {
+  host.innerHTML = `<p class="text"><span class="spinner"></span>Analysing all games (cached after first run)…</p>`;
+  try {
+    const meta = state.doc.meta;
+    const d = await getJSON(`/api/conversion?user=${encodeURIComponent(meta.player)}` +
+      `&format=${meta.format || ""}`);
+    host.innerHTML = d.sections.map((s) =>
+      `<h3>${esc(s.title)}</h3>` + s.widgets.map(renderWidget).join("")).join("");
+  } catch (e) {
+    host.innerHTML = `<p class="text" style="color:var(--loss)">${esc(e.message)}</p>`;
+  }
+}
+
+async function gotoGame(id) {
+  state.mode = "game"; renderTabs(); renderControls();
+  setStatus("Running Stockfish… first analysis can take a few seconds.", false, true);
+  try {
+    state.doc = await getJSON(`/api/game?selector=${encodeURIComponent(id)}&depth=${state.cfg.depth}`);
+    state.hidden = new Set(); $("chips").innerHTML = "";
+    renderSections(); setStatus("");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  } catch (e) { setStatus(e.message, true); }
+}
+
 function initChart(host, series) {
   let gran = "game";
   const bar = document.createElement("div"); bar.className = "chart-toolbar";
@@ -243,6 +398,9 @@ function initChart(host, series) {
 
 function renderSections() {
   pendingCharts = [];
+  pendingRecents = [];
+  pendingConversions = [];
+  pendingEvals = [];
   const doc = state.doc;
   const html = doc.sections.filter((s) => !state.hidden.has(s.title)).map((s) =>
     (s.title ? `<h2>${esc(s.title)}</h2>` : "") + s.widgets.map(renderWidget).join("")
@@ -251,7 +409,11 @@ function renderSections() {
     ` <a href="${doc.meta.url}" target="_blank" rel="noopener">↗</a>` : "";
   $("result").innerHTML = `<h1>${esc(doc.title)}${link}</h1>` +
     (doc.subtitle ? `<p class="sub-title">${esc(doc.subtitle)}</p>` : "") + html;
+  document.title = doc.title + " · Chess Analyzer";
   pendingCharts.forEach((c) => initChart($(c.id), c.series));
+  pendingRecents.forEach((id) => initRecent($(id)));
+  pendingConversions.forEach((id) => initConversion($(id)));
+  pendingEvals.forEach((e) => buildEvalChart($(e.id), e.plies, e.moves));
 }
 
 function renderChips() {
@@ -311,32 +473,26 @@ async function loadGames() {
 
 async function run() {
   $("run").disabled = true;
+  let url, busy;
+  if (state.mode === "player") {
+    url = `/api/player?user=${encodeURIComponent($("f-user").value.trim())}&format=${$("f-fmt").value}`;
+    busy = "Building report…";
+  } else if (state.mode === "game") {
+    url = `/api/game?selector=${encodeURIComponent($("f-game").value)}&depth=${$("f-depth").value}`;
+    busy = "Running Stockfish… first analysis can take a few seconds.";
+  } else {
+    url = `/api/compare?a=${encodeURIComponent($("f-a").value.trim())}&b=${encodeURIComponent($("f-b").value.trim())}`;
+    busy = "Comparing…";
+  }
+  setStatus(busy, false, true);
   try {
-    if (state.mode === "player") {
-      setStatus("Building report…", false, true);
-      const doc = await getJSON(`/api/player?user=${encodeURIComponent($("f-user").value.trim())}` +
-        `&format=${$("f-fmt").value}`);
-      state.doc = doc; state.hidden = new Set();
-      renderChips(); renderSections(); setStatus("");
-    } else if (state.mode === "game") {
-      setStatus("Running Stockfish… first analysis can take a few seconds.", false, true);
-      const d = await getJSON(`/api/game?selector=${encodeURIComponent($("f-game").value)}&depth=${$("f-depth").value}`);
-      injectHTML(d); setStatus("");
-    } else {
-      setStatus("Comparing…", false, true);
-      const d = await getJSON(`/api/compare?a=${encodeURIComponent($("f-a").value.trim())}&b=${encodeURIComponent($("f-b").value.trim())}`);
-      injectHTML(d); setStatus("");
-    }
+    state.doc = await getJSON(url);
+    state.hidden = new Set();
+    if (state.mode === "player") renderChips(); else $("chips").innerHTML = "";
+    renderSections(); setStatus("");
     window.scrollTo({ top: 0, behavior: "smooth" });
   } catch (e) { setStatus(e.message, true); }
   finally { $("run").disabled = false; }
-}
-
-function injectHTML(d) {
-  const link = d.meta && d.meta.url ? ` <a href="${d.meta.url}" target="_blank" rel="noopener">↗</a>` : "";
-  $("result").innerHTML = `<h1>${esc(d.title)}${link}</h1>` +
-    (d.subtitle ? `<p class="sub-title">${esc(d.subtitle)}</p>` : "") + d.html;
-  document.title = d.title + " · Chess Analyzer";
 }
 
 // ----------------------------------------------------------------------- init
@@ -349,8 +505,27 @@ function renderTabs() {
   });
 }
 
+async function syncGames() {
+  const btn = $("sync");
+  btn.disabled = true;
+  setStatus("Syncing from Chess.com…", false, true);
+  try {
+    const r = await fetch("/api/scrape?user=" + encodeURIComponent(state.cfg.user || ""),
+      { method: "POST" });
+    const d = await r.json();
+    if (!r.ok || d.error) throw new Error(d.error || `HTTP ${r.status}`);
+    const skip = d.skipped ? `, ${d.skipped} months already up to date` : "";
+    setStatus(`Synced: ${d.new} new game${d.new === 1 ? "" : "s"}${skip}.`);
+  } catch (e) {
+    setStatus("Sync failed: " + e.message, true);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 (async function init() {
   try { state.cfg = await getJSON("/api/config"); }
   catch (e) { setStatus("Backend not reachable: " + e.message, true); return; }
   renderTabs(); renderControls();
+  $("sync").onclick = syncGames;
 })();

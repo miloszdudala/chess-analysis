@@ -2,6 +2,7 @@
 import chess
 import chess.svg
 
+from ... import config
 from ...registry import metric
 from ... import widgets as W
 
@@ -22,6 +23,20 @@ def summary(ctx):
         W.card(a.acpl.get("black"), "Black ACPL"),
         W.card(len(a.blunders()), "Blunders (both)"),
     ])
+
+
+@metric("game", title="Conversion", order=15, needs=("engine",))
+def conversion(ctx):
+    cp = int(config.get("DECISIVE_CP", "200"))
+    d = ctx.analysis.decisive(cp)
+    thr = f"{cp / 100:.1f}"
+    if not d["reached"]:
+        return W.cards([W.card("—", f"Decisive (±{thr})",
+                               sub=f"stayed within ±{thr}")])
+    ticker = "held ✓" if d["held"] else "lost ✗"
+    return W.cards([W.card(
+        f"move {d['move_no']}", f"Decisive (±{thr})",
+        sub=f"{d['side'].title()} · {ticker}")])
 
 
 @metric("game", title="Evaluation", order=20, needs=("engine",))

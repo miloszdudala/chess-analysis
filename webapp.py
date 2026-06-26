@@ -34,15 +34,6 @@ def api(fn):
     return wrapper
 
 
-def payload(doc) -> dict:
-    return {
-        "title": doc.title,
-        "subtitle": doc.subtitle,
-        "meta": doc.meta,
-        "html": render_html.render_sections(doc),
-    }
-
-
 # --- static frontend --------------------------------------------------------
 
 @app.get("/")
@@ -72,6 +63,18 @@ def api_config():
     })
 
 
+@app.post("/api/scrape")
+@api
+def api_scrape():
+    import scraper
+    user = request.args.get("user") or config.get("CHESS_USERNAME")
+    if not user:
+        return jsonify({"error": "No username. Set CHESS_USERNAME in .env."}), 400
+    res = scraper.scrape(user, GAMES_DIR)   # hits the Chess.com API (user-triggered)
+    res["user"] = user
+    return jsonify(res)
+
+
 @app.get("/api/games")
 @api
 def api_games():
@@ -95,6 +98,75 @@ def api_player():
     return jsonify(doc.to_dict())   # JSON widgets -> rendered client-side
 
 
+@app.get("/api/recent")
+@api
+def api_recent():
+    import chess.engine
+    from chessanalysis.enrich import engine as eng
+
+    user = request.args.get("user") or config.get("CHESS_USERNAME")
+    fmt = request.args.get("format") or None
+    n = request.args.get("n", default=10, type=int)
+    cp = int(config.get("DECISIVE_CP", "200"))
+    depth = int(config.get("RECENT_DEPTH", "12"))
+
+    games = load_games(GAMES_DIR, user)
+    if fmt:
+        games = [g for g in games if g.time_class == fmt]
+    games = list(reversed(games))            # most recent first
+    if n and n > 0:
+        games = games[:n]
+
+    proc, rows = None, []
+    try:
+        for g in games:
+            if proc is None:                  # open one engine for the whole batch
+                proc = chess.engine.SimpleEngine.popen_uci(eng.find_engine())
+            a = eng.analyse_game(g, depth=depth, engine=proc)
+            d = a.decisive(cp)
+            rows.append({
+                "id": g.game_id, "date": g.date, "color": g.color,
+                "opponent": g.opponent, "opp_elo": g.opp_elo,
+                "result": g.result, "outcome": g.outcome,
+                "accuracy": a.accuracy.get(g.color),
+                "blunders": len(a.blunders(g.color)),
+                "decisive": (None if not d["reached"] else
+                             {"move": d["move_no"], "held": d["held"], "side": d["side"]}),
+            })
+    finally:
+        if proc:
+            proc.quit()
+    return jsonify({"threshold": cp, "games": rows})
+
+
+@app.get("/api/conversion")
+@api
+def api_conversion():
+    import chess.engine
+    from chessanalysis import cache, insights
+    from chessanalysis.enrich import engine as eng
+
+    user = request.args.get("user") or config.get("CHESS_USERNAME")
+    fmt = request.args.get("format") or None
+    cp = int(config.get("DECISIVE_CP", "200"))
+    depth = int(config.get("RECENT_DEPTH", "12"))
+
+    games = load_games(GAMES_DIR, user)
+    if fmt:
+        games = [g for g in games if g.time_class == fmt]
+
+    proc, pairs = None, []
+    try:
+        for g in games:
+            if cache.load("engine", f"{g.game_id}_d{depth}") is None and proc is None:
+                proc = chess.engine.SimpleEngine.popen_uci(eng.find_engine())
+            pairs.append((g, eng.analyse_game(g, depth=depth, engine=proc)))
+    finally:
+        if proc:
+            proc.quit()
+    return jsonify({"sections": insights.conversion_report(pairs, cp)})
+
+
 @app.get("/api/game")
 @api
 def api_game():
@@ -102,7 +174,7 @@ def api_game():
     selector = request.args.get("selector", "last")
     depth = request.args.get("depth", type=int)
     doc = modes.get("game")(user, games_dir=GAMES_DIR, selector=selector, depth=depth)
-    return jsonify(payload(doc))
+    return jsonify(doc.to_dict())
 
 
 @app.get("/api/compare")
@@ -111,7 +183,7 @@ def api_compare():
     a, b = request.args.get("a"), request.args.get("b")
     if not a or not b:
         return jsonify({"error": "compare needs two players (a and b)."}), 400
-    return jsonify(payload(modes.get("compare")(a, b, games_dir=GAMES_DIR)))
+    return jsonify(modes.get("compare")(a, b, games_dir=GAMES_DIR).to_dict())
 
 
 if __name__ == "__main__":

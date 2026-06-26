@@ -17,6 +17,11 @@
     padding: .2rem 0; border-bottom: 2px solid transparent; }
   .tab:hover { color: var(--ink); }
   .tab.active { color: var(--ink); border-bottom-color: var(--accent); }
+  .sync { margin-left: auto; background: var(--panel); border: 1px solid var(--line);
+    color: var(--ink); border-radius: 8px; padding: .4rem .85rem; cursor: pointer;
+    font: inherit; font-size: .85rem; }
+  .sync:hover { border-color: var(--accent); color: var(--accent); }
+  .sync:disabled { opacity: .55; cursor: default; }
   .controls { max-width: 960px; margin: 1.3rem auto .4rem; display: flex; gap: .7rem;
     align-items: end; flex-wrap: wrap; }
   .field { display: flex; flex-direction: column; gap: .3rem; }
@@ -50,6 +55,7 @@
   <div class="appbar">
     <span class="brand">♟ Chess Analyzer</span>
     <div class="tabs" id="tabs"></div>
+    <button class="sync" id="sync" title="Download new games from Chess.com">⟳ Sync games</button>
   </div>
 </header>
 

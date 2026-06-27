@@ -26,7 +26,12 @@ python3 scraper.py
 
 # 2. Start the app, then open http://127.0.0.1:5050
 .venv/bin/python webapp.py
+
+# Stop the app: press Ctrl+C in its terminal, or from another terminal:
+pkill -f webapp.py
 ```
+
+Run it on a different port with `PORT=8080 .venv/bin/python webapp.py`.
 
 In the browser, pick a tab:
 

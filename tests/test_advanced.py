@@ -27,6 +27,31 @@ def test_empty_report():
     assert insights.advanced_report([]) == []
 
 
+class _G:
+    def __init__(self, date, color):
+        self.date, self.color = date, color
+
+
+def test_accuracy_trend():
+    a1 = _analysis([], [0], )
+    a1.accuracy = {"white": 90.0}
+    a2 = _analysis([], [0])
+    a2.accuracy = {"white": 80.0}
+    out = insights.accuracy_trend([(_G("2026.01.01", "white"), a1),
+                                   (_G("2026.01.02", "white"), a2)])
+    line = out[0]["widgets"][0]
+    assert out[0]["title"] == "Accuracy over time"
+    assert line["type"] == "line" and line["toolbar"] is True and line["agg"] == "mean"
+    assert line["series"][0]["points"] == [{"x": "2026.01.01", "y": 90.0},
+                                           {"x": "2026.01.02", "y": 80.0}]
+
+
+def test_accuracy_trend_needs_two_points():
+    a = _analysis([], [0])
+    a.accuracy = {"white": 90.0}
+    assert insights.accuracy_trend([(_G("2026.01.01", "white"), a)]) == []
+
+
 def test_cascading_error_probability():
     # white errors on plies 1 and 3 (consecutive own moves), ok on 5
     moves = [mev(1, "white", "blunder"), mev(2, "black"),

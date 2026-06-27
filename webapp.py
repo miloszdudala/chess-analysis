@@ -9,6 +9,7 @@ endpoint builds a Document and returns its rendered section HTML + metadata.
 from __future__ import annotations
 
 import os
+import threading
 from functools import wraps
 
 from flask import Flask, Response, jsonify, request, send_from_directory
@@ -19,6 +20,20 @@ from chessanalysis.model import load_games
 app = Flask(__name__, static_folder=None)
 FRONTEND = os.path.join(os.path.dirname(__file__), "frontend")
 GAMES_DIR = config.get("GAMES_DIR", "games")
+
+# One long-lived engine for interactive variation analysis (/api/analyse).
+# A lock serialises access since the dev server may handle requests in threads.
+_ANALYSE_LOCK = threading.Lock()
+_ANALYSE_ENGINE = None
+
+
+def _analyse_engine():
+    global _ANALYSE_ENGINE
+    if _ANALYSE_ENGINE is None:
+        import chess.engine
+        from chessanalysis.enrich import engine as eng
+        _ANALYSE_ENGINE = chess.engine.SimpleEngine.popen_uci(eng.find_engine())
+    return _ANALYSE_ENGINE
 
 
 def api(fn):
@@ -167,7 +182,10 @@ def api_conversion():
     finally:
         if proc:
             proc.quit()
-    sections = insights.conversion_report(pairs, cp) + insights.advanced_report(pairs)
+    sections = (insights.outcome_reasons(pairs, cp)
+                + insights.accuracy_trend(pairs)
+                + insights.conversion_report(pairs, cp)
+                + insights.advanced_report(pairs))
     return jsonify({"sections": sections})
 
 
@@ -179,6 +197,68 @@ def api_game():
     depth = request.args.get("depth", type=int)
     doc = modes.get("game")(user, games_dir=GAMES_DIR, selector=selector, depth=depth)
     return jsonify(doc.to_dict())
+
+
+@app.get("/api/analyse")
+@api
+def api_analyse():
+    """Live engine analysis of an arbitrary position, for variation exploration.
+
+    Optionally applies one move first (uci; auto-queens a bare promotion), then
+    returns the resulting FEN, eval (white-POV cp), and the top moves for arrows.
+    """
+    import chess
+    import chess.engine
+    from chessanalysis.enrich.engine import MATE_CP
+
+    fen = request.args.get("fen")
+    move = request.args.get("move")
+    depth = request.args.get("depth", default=12, type=int)
+    if not fen:
+        return jsonify({"error": "fen required"}), 400
+    try:
+        board = chess.Board(fen)
+    except ValueError:
+        return jsonify({"error": "invalid fen"}), 400
+
+    move_san = None
+    if move:
+        try:
+            mv = chess.Move.from_uci(move)
+        except ValueError:
+            mv = None
+        if mv not in board.legal_moves and move and len(move) == 4:
+            mv = chess.Move.from_uci(move + "q")   # bare pawn-to-last-rank → queen
+        if mv not in board.legal_moves:
+            return jsonify({"fen": board.fen(), "legal": False})
+        move_san = board.san(mv)
+        board.push(mv)
+
+    out = {"fen": board.fen(), "legal": True, "move_san": move_san,
+           "turn": "w" if board.turn else "b", "game_over": board.is_game_over()}
+    if board.is_game_over():
+        if board.is_checkmate():
+            out["cp"] = -MATE_CP if board.turn == chess.WHITE else MATE_CP
+        else:
+            out["cp"] = 0
+        out["best"] = []
+        return jsonify(out)
+
+    with _ANALYSE_LOCK:
+        infos = _analyse_engine().analyse(
+            board, chess.engine.Limit(depth=depth), multipv=3)
+    if isinstance(infos, dict):
+        infos = [infos]
+    best = []
+    for it in infos:
+        pv = it.get("pv")
+        if not pv:
+            continue
+        best.append({"uci": pv[0].uci(), "san": board.san(pv[0]),
+                     "cp": it["score"].white().score(mate_score=MATE_CP)})
+    out["cp"] = best[0]["cp"] if best else 0
+    out["best"] = best
+    return jsonify(out)
 
 
 @app.get("/api/compare")

@@ -62,7 +62,9 @@ def test_board_explorer_none_when_no_positions():
 
 def test_summary(sample_analysis):
     cards = summary(_ctx(sample_analysis))
-    assert cards["type"] == "cards" and len(cards["items"]) == 5
+    assert cards["type"] == "cards" and len(cards["items"]) == 7
+    labels = [c["label"] for c in cards["items"]]
+    assert "White top-3 match" in labels and "Black top-3 match" in labels
 
 
 def test_move_quality_chart_then_table(sample_analysis):

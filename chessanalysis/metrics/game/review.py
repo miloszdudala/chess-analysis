@@ -44,6 +44,11 @@ def board_explorer(ctx):
     return W.review(positions, moves, g.color, g.h("White"), g.h("Black"))
 
 
+def _top3(a, side):
+    v = a.top3.get(side)
+    return f"{v:.0f}%" if v is not None else "—"
+
+
 @metric("game", title=None, order=10, needs=("engine",))
 def summary(ctx):
     g, a = ctx.game, ctx.analysis
@@ -51,6 +56,8 @@ def summary(ctx):
     return W.cards([
         W.card(_acc(a, "white"), "White accuracy", sub=white),
         W.card(_acc(a, "black"), "Black accuracy", sub=black),
+        W.card(_top3(a, "white"), "White top-3 match", sub="moves in engine's top 3"),
+        W.card(_top3(a, "black"), "Black top-3 match", sub="moves in engine's top 3"),
         W.card(a.acpl.get("white"), "White ACPL"),
         W.card(a.acpl.get("black"), "Black ACPL"),
         W.card(len(a.blunders()), "Blunders (both)"),
@@ -117,14 +124,16 @@ def move_quality(ctx):
                           for k, v in _quality_counts(a, side).items()]}
             for side in ("white", "black")]
     chart = W.barstack(rows, QUALITY_PALETTE, title="Every move, classified")
-    # 2) the accuracy / ACPL / error-count table
-    cols = ["Side", "Accuracy", "ACPL", "Inaccuracies", "Mistakes", "Blunders"]
+    # 2) the accuracy / top-3 / ACPL / error-count table
+    cols = ["Side", "Accuracy", "Top-3 match", "ACPL",
+            "Inaccuracies", "Mistakes", "Blunders"]
     table_rows = []
     for side in ("white", "black"):
         c = a.counts[side]
+        t3 = a.top3.get(side)
         table_rows.append([
-            side.title(), _acc(a, side), a.acpl.get(side),
-            c["inaccuracy"], c["mistake"], c["blunder"],
+            side.title(), _acc(a, side), f"{t3:.0f}%" if t3 is not None else "—",
+            a.acpl.get(side), c["inaccuracy"], c["mistake"], c["blunder"],
         ])
     return [chart, W.table(cols, table_rows)]
 

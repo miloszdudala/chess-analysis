@@ -146,5 +146,15 @@ def group(title: str, widgets: list[dict], layout: str = "row") -> dict:
     return {"type": "group", "title": title, "layout": layout, "widgets": widgets}
 
 
+def reasons(label: str, groups: list[dict]) -> dict:
+    """Expandable list of outcome reasons, each drilling down to its games.
+
+    groups: [{"label":.., "count":n, "sub":.., "stat":.., "games":[{
+                "id","date","opponent","opp_elo","outcome","detail"}]}]
+    (pre-sorted by count). Clicking a game row opens that game's review.
+    """
+    return {"type": "reasons", "label": label, "groups": groups}
+
+
 def text(body: str) -> dict:
     return {"type": "text", "body": body}

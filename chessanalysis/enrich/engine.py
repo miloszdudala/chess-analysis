@@ -55,6 +55,54 @@ def _classify(wp_loss: float) -> str:
     return "ok"
 
 
+def _stddev(xs) -> float:
+    if len(xs) < 2:
+        return 0.0
+    m = sum(xs) / len(xs)
+    return (sum((x - m) ** 2 for x in xs) / len(xs)) ** 0.5
+
+
+def _harmonic_mean(xs) -> float:
+    safe = [max(x, 1e-6) for x in xs]      # a single 0% move shouldn't divide-by-zero
+    return len(safe) / sum(1.0 / x for x in safe)
+
+
+def _game_accuracy(evals, moves) -> dict:
+    """Per-colour game accuracy à la Lichess (not a naive mean of moves).
+
+    Lichess blends two aggregates of the per-move accuracies:
+      * a *volatility-weighted* mean — each move is weighted by how sharp the
+        position was, measured as the stddev of the white win% over a sliding
+        window, so quiet shuffling counts for little and critical moments count
+        for a lot;
+      * the *harmonic* mean — which a single dreadful move drags down hard.
+    The reported accuracy is the average of the two.
+    """
+    out = {"white": None, "black": None}
+    if not moves:
+        return out
+    wp = [win_prob(e) for e in evals]              # white-POV win%, len = plies+1
+    window = max(2, min(8, len(wp) // 10))
+    weights = []                                   # one per played move (by ply)
+    for i in range(1, len(wp)):
+        lo = max(0, i - window + 1)
+        weights.append(max(_stddev(wp[lo:i + 1]), 0.5))   # floor: flat ≠ weightless
+    acc = {"white": [], "black": []}
+    wts = {"white": [], "black": []}
+    for m in moves:
+        i = m.ply - 1
+        if 0 <= i < len(weights):
+            acc[m.color].append(m.accuracy)
+            wts[m.color].append(weights[i])
+    for c in ("white", "black"):
+        if not acc[c]:
+            continue
+        wsum = sum(wts[c]) or 1.0
+        weighted = sum(a * w for a, w in zip(acc[c], wts[c])) / wsum
+        out[c] = round((weighted + _harmonic_mean(acc[c])) / 2, 1)
+    return out
+
+
 @dataclass
 class MoveEval:
     ply: int
@@ -67,6 +115,7 @@ class MoveEval:
     label: str          # ok / inaccuracy / mistake / blunder
     fen_before: str
     move_uci: str
+    top3: bool = False  # the move was among the engine's top-3 candidates
 
 
 @dataclass
@@ -76,6 +125,7 @@ class GameAnalysis:
     evals: list[int]            # white-POV centipawns, len = plies + 1
     moves: list[MoveEval] = field(default_factory=list)
     accuracy: dict = field(default_factory=dict)   # {"white":.., "black":..}
+    top3: dict = field(default_factory=dict)        # % of moves in engine's top-3
     acpl: dict = field(default_factory=dict)
     counts: dict = field(default_factory=dict)      # per side: inaccuracy/mistake/blunder
     fens: list = field(default_factory=list)        # FEN per position, len = plies + 1
@@ -176,10 +226,11 @@ def _derive(raw: dict, depth: int, engine_name: str) -> GameAnalysis:
     best_uci = raw["best_uci"]
     fens = raw["fens"]
     moves_uci = raw.get("moves_uci", [])
+    top_moves = raw.get("top_moves", [])
 
     move_evals: list[MoveEval] = []
-    acc_sum = {"white": 0.0, "black": 0.0}
     cpl_sum = {"white": 0, "black": 0}
+    top3_sum = {"white": 0, "black": 0}
     n = {"white": 0, "black": 0}
     counts = {"white": {"inaccuracy": 0, "mistake": 0, "blunder": 0},
               "black": {"inaccuracy": 0, "mistake": 0, "blunder": 0}}
@@ -210,23 +261,28 @@ def _derive(raw: dict, depth: int, engine_name: str) -> GameAnalysis:
             except (ValueError, AssertionError):
                 best_san = ""
 
+        move_uci = moves_uci[i] if i < len(moves_uci) else ""
+        cand = [t["uci"] for t in (top_moves[i] if i < len(top_moves) else [])][:3]
+        in_top3 = bool(move_uci) and move_uci in cand
+
         move_evals.append(MoveEval(
             ply=i + 1, color=color, san=san, best_san=best_san,
             cp_loss=cp_loss, wp_loss=wp_loss, accuracy=acc, label=label,
             fen_before=fens[i] if i < len(fens) else "",
-            move_uci=moves_uci[i] if i < len(moves_uci) else "",
+            move_uci=move_uci, top3=in_top3,
         ))
-        acc_sum[color] += acc
         cpl_sum[color] += cp_loss
+        top3_sum[color] += in_top3
         n[color] += 1
         if label in counts[color]:
             counts[color][label] += 1
 
-    accuracy = {c: round(acc_sum[c] / n[c], 1) if n[c] else None for c in n}
+    accuracy = _game_accuracy(evals, move_evals)
+    top3 = {c: round(100 * top3_sum[c] / n[c], 1) if n[c] else None for c in n}
     acpl = {c: round(cpl_sum[c] / n[c]) if n[c] else None for c in n}
     return GameAnalysis(depth=depth, engine_name=engine_name, evals=evals,
-                        moves=move_evals, accuracy=accuracy, acpl=acpl,
-                        counts=counts, fens=fens, top_moves=raw.get("top_moves", []))
+                        moves=move_evals, accuracy=accuracy, top3=top3, acpl=acpl,
+                        counts=counts, fens=fens, top_moves=top_moves)
 
 
 def analyse_game(game, depth: int | None = None, engine=None) -> GameAnalysis:

@@ -68,6 +68,25 @@ def test_derive_accuracy_and_counts(sample_analysis):
     assert a.acpl["white"] is not None
 
 
+def test_top3_match_flag_and_aggregate():
+    raw = build_raw(["e2e4", "e7e5"], [10, 8, 12])
+    raw["top_moves"][0] = [{"uci": "e2e4", "cp": 10}]    # white played the #1
+    raw["top_moves"][1] = [{"uci": "g8f6", "cp": 8}]     # black did NOT (played e5)
+    a = eng._derive(raw, depth=10, engine_name="x")
+    assert a.moves[0].top3 is True and a.moves[1].top3 is False
+    assert a.top3["white"] == 100.0 and a.top3["black"] == 0.0
+
+
+def test_game_accuracy_blend_penalises_a_blunder():
+    clean = eng._derive(build_raw(["e2e4", "e7e5", "g1f3"], [10, 10, 10, 10]),
+                        depth=10, engine_name="x")
+    assert clean.accuracy["white"] > 95          # flat eval -> near-perfect
+    # same but white throws away the game on move 2
+    blund = eng._derive(build_raw(["e2e4", "e7e5", "f1c4"], [10, 10, 10, -900]),
+                        depth=10, engine_name="x")
+    assert blund.accuracy["white"] < clean.accuracy["white"]
+
+
 def test_derive_handles_missing_top_moves():
     """Old caches predate top_moves; _derive must still work (empty list)."""
     raw = build_raw(["e2e4", "e7e5"], [10, 8, 12])

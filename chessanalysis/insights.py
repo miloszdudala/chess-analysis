@@ -12,6 +12,7 @@ from collections import Counter
 
 import chess
 
+from . import diagnosis as dx
 from . import widgets as W
 
 PHASE_ORDER = ["Opening", "Middlegame", "Endgame"]
@@ -35,7 +36,7 @@ def _phase(move_no: int) -> str:
 
 
 def _blank():
-    return {"n": 0, "acc": 0.0, "bl": 0, "mi": 0}
+    return {"n": 0, "acc": 0.0, "bl": 0, "mi": 0, "t3": 0}
 
 
 def conversion_report(pairs, cp: int = 200) -> list[dict]:
@@ -87,6 +88,7 @@ def conversion_report(pairs, cp: int = 200) -> list[dict]:
                 bucket["acc"] += m.accuracy
                 bucket["bl"] += (m.label == "blunder")
                 bucket["mi"] += (m.label == "mistake")
+                bucket["t3"] += int(m.top3)
 
     def table(agg, order, label_col):
         rows = []
@@ -96,12 +98,24 @@ def conversion_report(pairs, cp: int = 200) -> list[dict]:
                 continue
             rows.append([
                 key, b["n"], f"{b['acc'] / b['n']:.1f}%",
+                f"{round(100 * b['t3'] / b['n'])}%",
                 round(100 * b["mi"] / b["n"], 1), round(100 * b["bl"] / b["n"], 1),
             ])
-        return W.table([label_col, "Moves", "Avg accuracy", "Mistakes/100", "Blunders/100"], rows)
+        return W.table([label_col, "Moves", "Avg accuracy", "Top-3 match",
+                        "Mistakes/100", "Blunders/100"], rows)
 
     thr = f"{cp / 100:.0f}"
+    moves_n = sum(b["n"] for b in phase_agg.values())
+    moves_t3 = sum(b["t3"] for b in phase_agg.values())
+    # headline accuracy = mean of the per-game (Lichess-style) accuracies, not a
+    # naive average over every move.
+    game_accs = [a.accuracy.get(g.color) for g, a in pairs
+                 if a.accuracy.get(g.color) is not None]
     cards = W.cards([
+        W.card(f"{sum(game_accs) / len(game_accs):.1f}%" if game_accs else "—",
+               "Your accuracy", sub="Lichess-style (volatility-weighted)"),
+        W.card(f"{round(100 * moves_t3 / moves_n)}%" if moves_n else "—",
+               "Top-3 match", sub="your moves in the engine's top 3"),
         W.card(f"{round(100 * won / reached_win)}%" if reached_win else "—",
                "Conversion", sub=f"{won}/{reached_win} winning games won"),
         W.card(f"{round(100 * saved / reached_loss)}%" if reached_loss else "—",
@@ -138,6 +152,23 @@ def conversion_report(pairs, cp: int = 200) -> list[dict]:
         {"title": "Accuracy by position (your move)",
          "widgets": [table(state_agg, [s[0] for s in STATES], "Position")]},
     ]
+
+
+def accuracy_trend(pairs) -> list[dict]:
+    """Your engine accuracy per game over time (Game / Day / Month averaging).
+
+    pairs must be chronological. One point per game; the chart's Day/Month
+    buttons average accuracy within each period (agg='mean').
+    """
+    pts = [{"x": g.date, "y": round(a.accuracy[g.color], 1)}
+           for g, a in pairs
+           if a.accuracy.get(g.color) is not None and g.date]
+    if len(pts) < 2:
+        return []
+    line = W.line([{"name": "Accuracy", "points": pts}], y_label="Accuracy")
+    line["toolbar"] = True
+    line["agg"] = "mean"
+    return [{"title": "Accuracy over time", "widgets": [line]}]
 
 
 # --- advanced, engine-derived diagnostics -----------------------------------
@@ -244,3 +275,90 @@ def advanced_report(pairs) -> list[dict]:
         "Premature simplification — share of multi-capture positions where you "
         "released the tension but the engine preferred to keep it.")
     return [{"title": "Advanced metrics", "widgets": [cards, notes]}]
+
+
+def outcome_reasons(pairs, cp: int = 200) -> list[dict]:
+    """Why your games end the way they do — the distribution of win/loss reasons.
+
+    Runs the per-game diagnosis (diagnosis.diagnose) over every analysed game and
+    tallies the dominant reason for wins and for losses separately, plus the
+    cross-cutting factors (time pressure, drift) that recur across games.
+    """
+    # outcome -> reason key -> list of per-game entries (for the drill-down)
+    buckets = {"win": {}, "loss": {}, "draw": {}}
+    factors = Counter()
+    totals = Counter()
+    n = 0
+    for g, a in pairs:
+        dg = dx.diagnose(g, a, cp)
+        if dg is None:
+            continue
+        n += 1
+        totals[dg.outcome] += 1
+        buckets[dg.outcome].setdefault(dg.primary, []).append({
+            "id": getattr(g, "game_id", ""),
+            "date": getattr(g, "date", ""),
+            "opponent": getattr(g, "opponent", ""),
+            "opp_elo": getattr(g, "opp_elo", None),
+            "outcome": dg.outcome,
+            "detail": dg.detail,
+            "acc": a.accuracy.get(getattr(g, "color", "")),
+        })
+        for f in dg.factors:
+            factors[f] += 1
+    if not n:
+        return []
+
+    def top_card(reason_keys, reasons, label):
+        items = buckets[reason_keys]
+        total = sum(len(v) for v in items.values())
+        if not total:
+            return W.card("—", label)
+        key, entries = max(items.items(), key=lambda kv: len(kv[1]))
+        return W.card(reasons[key], label,
+                      sub=f"{len(entries)}/{total} · {round(100 * len(entries) / total)}%")
+
+    cards = W.cards([
+        top_card("loss", dx.LOSS_REASONS, "Top reason you lose"),
+        top_card("win", dx.WIN_REASONS, "Top reason you win"),
+        W.card(f"{round(100 * factors['time'] / n)}%" if n else "—",
+               "Time pressure a factor", sub=f"in {factors['time']}/{n} games"),
+    ])
+
+    plural = {"win": "wins", "loss": "losses", "draw": "draws"}
+
+    def groups_for(outcome, reasons):
+        total = totals[outcome] or 1
+        out = []
+        for key, entries in sorted(buckets[outcome].items(),
+                                   key=lambda kv: -len(kv[1])):
+            accs = [e["acc"] for e in entries if e["acc"] is not None]
+            elos = [e["opp_elo"] for e in entries if e["opp_elo"]]
+            stat = []
+            if accs:
+                stat.append(f"avg accuracy {sum(accs) / len(accs):.0f}%")
+            if elos:
+                stat.append(f"avg opponent {round(sum(elos) / len(elos))}")
+            out.append({
+                "label": reasons.get(key, key),
+                "count": len(entries),
+                "sub": f"{round(100 * len(entries) / total)}% of {plural[outcome]}",
+                "stat": " · ".join(stat),
+                "games": sorted(entries, key=lambda e: e["date"], reverse=True),
+            })
+        return out
+
+    notes = W.text(
+        "Each game is reduced to one dominant reason for its result — a single "
+        "blunder, a slow positional drift, time pressure, an opponent's gift, a "
+        "thrown-away winning position, or simply being out-played. Time pressure "
+        "and drift are also tracked as secondary factors that compound the main "
+        "cause. Click any reason to see the games behind it.")
+    widgets = [cards, notes]
+    for outcome, reasons, label in (("loss", dx.LOSS_REASONS, "Why you lose"),
+                                    ("win", dx.WIN_REASONS, "Why you win"),
+                                    ("draw", dx.DRAW_REASONS, "Your draws")):
+        groups = groups_for(outcome, reasons)
+        if groups:
+            widgets.append(W.reasons(label, groups))
+    return [{"title": "Why you win & lose", "widgets": widgets}]

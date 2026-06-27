@@ -86,7 +86,7 @@ def eval_graph(ctx):
     plies = [{"ply": 0, "cp": a.evals[0], "label": "ok"}]
     for i, m in enumerate(a.moves):
         plies.append({"ply": i + 1, "cp": a.evals[i + 1], "label": m.label})
-    return W.evalbar(plies, [m.san for m in a.moves])
+    return W.evalbar(plies, [m.san for m in a.moves], me=ctx.game.color)
 
 
 # move-quality palette (also fixes legend order), shared with the chart below

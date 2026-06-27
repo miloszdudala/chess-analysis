@@ -184,6 +184,7 @@ def api_conversion():
             proc.quit()
     sections = (insights.outcome_reasons(pairs, cp)
                 + insights.accuracy_trend(pairs)
+                + insights.eval_curve(pairs)
                 + insights.conversion_report(pairs, cp)
                 + insights.advanced_report(pairs))
     return jsonify({"sections": sections})

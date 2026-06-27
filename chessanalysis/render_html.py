@@ -374,6 +374,18 @@ _CSS = """
   .ev-zero { stroke:#777; stroke-width:1.4; vector-effect:non-scaling-stroke; }
   .ev-line { fill:none; stroke:#5a5a5a; stroke-width:1.4; vector-effect:non-scaling-stroke; }
   svg.evalc text.ev-ax { fill:var(--mut); font-size:10px; font-family:var(--mono); }
+  svg.evalc circle.ev-dot { stroke:#fff; stroke-width:1.2; vector-effect:non-scaling-stroke;
+                            transition:r .08s; }
+  svg.evalc circle.ev-dot:hover { r:7.5; }
+  .evc-legend { display:flex; flex-wrap:wrap; gap:.5rem .9rem; margin:0 0 .4rem; font-size:.82rem; }
+  .evc-key { display:inline-flex; align-items:center; gap:.35rem; cursor:pointer;
+             background:none; border:0; padding:.1rem .15rem; color:var(--mut);
+             font:inherit; border-radius:5px; }
+  .evc-key:hover { color:var(--ink); }
+  .evc-key.off { opacity:.4; text-decoration:line-through; }
+  .evc-sw { width:.85rem; height:.32rem; border-radius:2px; display:inline-block; }
+  .evc-sw.dashed { height:0; border-radius:0; background:transparent;
+                   border-top:2px dashed currentColor; }
   circle.m-blunder { fill:var(--loss); } circle.m-mistake { fill:#d99a3a; }
   circle.m-inaccuracy { fill:#e0b020; }
   .spark { width:100%; height:64px; }

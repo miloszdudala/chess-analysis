@@ -74,7 +74,13 @@ const WIDGETS = {
 
   eval: (w) => {
     const id = "eval-" + Math.random().toString(36).slice(2);
-    pendingEvals.push({ id, plies: w.plies, moves: w.moves });
+    pendingEvals.push({ id, plies: w.plies, moves: w.moves, me: w.me });
+    return `<div class="eval-host" id="${id}"></div>`;
+  },
+
+  evalcurve: (w) => {
+    const id = "evc-" + Math.random().toString(36).slice(2);
+    pendingEvalCurves.push({ id, groupings: w.groupings, default: w.default, y_label: w.y_label });
     return `<div class="eval-host" id="${id}"></div>`;
   },
 
@@ -199,6 +205,7 @@ let pendingCharts = [];
 let pendingRecents = [];
 let pendingConversions = [];
 let pendingEvals = [];
+let pendingEvalCurves = [];
 let pendingReviews = [];
 function renderWidget(w) {
   const fn = WIDGETS[w.type];
@@ -335,8 +342,29 @@ function aggregate(points, gran, agg = "last") {
 
 const DOT = { inaccuracy: "#e0b020", mistake: "#e08a2b", blunder: "#d0493b" };
 
-function buildEvalChart(host, plies, moves) {
+function buildEvalChart(host, plies, moves, me) {
   if (!plies || plies.length < 2) return;
+  // flagged-point filter: a dot at index i was played by white on odd i, black
+  // on even i; "mine"/"theirs" is relative to the analysed player's colour.
+  let filter = "both";   // both | mine | theirs
+  const colorAt = (i) => (i % 2 === 1 ? "white" : "black");
+  const showDot = (p, i) => DOT[p.label] && i > 0 &&
+    (filter === "both" || (colorAt(i) === me) === (filter === "mine"));
+
+  const bar = document.createElement("div"); bar.className = "chart-toolbar";
+  [["Both", "both"], ["Mine", "mine"], ["Opponent", "theirs"]].forEach(([lbl, val]) => {
+    const b = document.createElement("button");
+    b.className = "gbtn" + (val === filter ? " on" : "");
+    b.textContent = lbl;
+    b.onclick = () => {
+      filter = val;
+      [...bar.children].forEach((c) => c.classList.toggle("on", c === b));
+      svg.querySelector("#ev-dots").innerHTML = dotStr();
+    };
+    bar.appendChild(b);
+  });
+  host.appendChild(bar);
+
   const W = host.clientWidth || 880, H = 230;
   const M = { l: 34, r: 10, t: 10, b: 22 };
   const pw = W - M.l - M.r, ph = H - M.t - M.b;
@@ -354,8 +382,9 @@ function buildEvalChart(host, plies, moves) {
 
   const curve = plies.map((p, i) => `${xPix(i).toFixed(1)},${yPix(p.cp).toFixed(1)}`);
   const base = (M.t + ph).toFixed(1);
-  const dots = plies.map((p, i) => DOT[p.label]
-    ? `<circle cx="${xPix(i).toFixed(1)}" cy="${yPix(p.cp).toFixed(1)}" r="3.2" fill="${DOT[p.label]}"/>`
+  const dotStr = () => plies.map((p, i) => showDot(p, i)
+    ? `<circle class="ev-dot" cx="${xPix(i).toFixed(1)}" cy="${yPix(p.cp).toFixed(1)}" ` +
+      `r="5.5" fill="${DOT[p.label]}"/>`
     : "").join("");
 
   // y-axis: eval in pawns; x-axis: move numbers
@@ -377,7 +406,8 @@ function buildEvalChart(host, plies, moves) {
     `<rect x="${M.l}" y="${M.t}" width="${pw}" height="${ph}" class="ev-black"/>` +
     `<polygon class="ev-white" points="${M.l},${base} ${curve.join(" ")} ${(M.l + pw).toFixed(1)},${base}"/>` +
     axes +
-    `<polyline class="ev-line" points="${curve.join(" ")}"/>` + dots +
+    `<polyline class="ev-line" points="${curve.join(" ")}"/>` +
+    `<g id="ev-dots">${dotStr()}</g>` +
     `<g id="g" style="display:none"><line class="chart-guide" y1="${M.t}" y2="${M.t + ph}"/></g>` +
     `<rect id="ov" x="${M.l}" y="${M.t}" width="${pw}" height="${ph}" fill="transparent"/>`;
 
@@ -401,6 +431,119 @@ function buildEvalChart(host, plies, moves) {
     tip.style.opacity = 1;
   };
   ov.onmouseleave = () => { tip.style.opacity = 0; g.style.display = "none"; };
+}
+
+// average-eval-by-move chart: centred lines, switchable groupings (Average /
+// By colour / By result). Each series may carry its own colour.
+const CURVE_COLORS = ["#1d6f6a", "#b06a2c", "#7a6f63"];
+
+function buildEvalCurve(host, groupings, dflt, yLabel) {
+  groupings = (groupings || []).filter((gr) =>
+    (gr.series || []).some((s) => s.points && s.points.length >= 2));
+  if (!groupings.length) return;
+  let cur = groupings.find((gr) => gr.key === dflt) || groupings[0];
+
+  let hidden = new Set();   // series names toggled off via the legend (per grouping)
+
+  const bar = document.createElement("div"); bar.className = "chart-toolbar";
+  const chart = document.createElement("div"); chart.className = "eval-host";
+  groupings.forEach((gr) => {
+    const b = document.createElement("button");
+    b.className = "gbtn" + (gr === cur ? " on" : "");
+    b.textContent = gr.label;
+    b.onclick = () => {
+      cur = gr; hidden = new Set();        // reset visibility when grouping changes
+      [...bar.children].forEach((c) => c.classList.toggle("on", c === b));
+      draw();
+    };
+    bar.appendChild(b);
+  });
+  host.appendChild(bar); host.appendChild(chart);
+
+  function draw() {
+    chart.innerHTML = "";
+    const all = cur.series.filter((s) => s.points && s.points.length >= 2);
+    const colorOf = (s) => s.color || CURVE_COLORS[all.indexOf(s) % CURVE_COLORS.length];
+    const series = all.filter((s) => !hidden.has(s.name));   // visible only
+    const W = host.clientWidth || 880, H = 240;
+    const M = { l: 40, r: 12, t: 12, b: 26 };
+    const pw = W - M.l - M.r, ph = H - M.t - M.b;
+    const xs = series.flatMap((s) => s.points.map((p) => p.x));
+    const ys = series.flatMap((s) => s.points.map((p) => p.y));
+    const xMin = xs.length ? Math.min(...xs) : 1, xMax = xs.length ? Math.max(...xs) : 2;
+    const yAbs = Math.max(0.5, Math.ceil((ys.length ? Math.max(...ys.map(Math.abs)) : 0.5) * 10) / 10 * 1.15);
+    const xPix = (x) => M.l + ((x - xMin) / (xMax - xMin || 1)) * pw;
+    const yPix = (y) => M.t + ph * (0.5 - Math.max(-yAbs, Math.min(yAbs, y)) / (2 * yAbs));
+
+    const NS = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(NS, "svg");
+    svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+    svg.classList.add("evalc");
+    const tip = document.createElement("div"); tip.className = "chart-tip";
+
+    let axes = "";
+    for (let t = 0; t <= 4; t++) {
+      const yv = yAbs - (2 * yAbs * t) / 4, y = yPix(yv).toFixed(1);
+      const cls = Math.abs(yv) < 1e-9 ? "ev-zero" : "ev-grid";
+      axes += `<line class="${cls}" x1="${M.l}" y1="${y}" x2="${M.l + pw}" y2="${y}"/>`;
+      const lbl = yv > 0 ? "+" + yv.toFixed(1) : yv.toFixed(1);
+      axes += `<text class="ev-ax" x="${M.l - 5}" y="${(+y + 3).toFixed(1)}" text-anchor="end">${lbl}</text>`;
+    }
+    for (let t = 0; t <= 6; t++) {
+      const xv = Math.round(xMin + ((xMax - xMin) * t) / 6);
+      axes += `<text class="ev-ax" x="${xPix(xv).toFixed(1)}" y="${H - 7}" text-anchor="middle">${xv}</text>`;
+    }
+    const lines = series.map((s) => {
+      const pts = s.points.map((p) => `${xPix(p.x).toFixed(1)},${yPix(p.y).toFixed(1)}`).join(" ");
+      const dash = s.dash ? ` stroke-dasharray="6 4"` : "";
+      return `<polyline points="${pts}" fill="none" stroke="${colorOf(s)}" ` +
+        `stroke-width="2.2" stroke-linejoin="round"${dash}/>`;
+    }).join("");
+    svg.innerHTML = axes + lines +
+      `<g id="g" style="display:none"><line class="chart-guide" y1="${M.t}" y2="${M.t + ph}"/></g>` +
+      `<rect id="ov" x="${M.l}" y="${M.t}" width="${pw}" height="${ph}" fill="transparent"/>`;
+
+    // legend doubles as a show/hide control — click a key to toggle its line
+    const leg = document.createElement("div"); leg.className = "evc-legend";
+    leg.innerHTML = all.map((s) => {
+      const off = hidden.has(s.name) ? " off" : "";
+      return `<button class="evc-key${off}" data-name="${esc(s.name)}">` +
+        `<span class="evc-sw${s.dash ? " dashed" : ""}" ` +
+        `style="${s.dash ? "border-color" : "background"}:${colorOf(s)}"></span>` +
+        `${esc(s.name)}</button>`;
+    }).join("");
+    leg.onclick = (e) => {
+      const key = e.target.closest(".evc-key"); if (!key) return;
+      const name = key.dataset.name;
+      // don't allow hiding the last visible series
+      if (!hidden.has(name) && series.length <= 1) return;
+      hidden.has(name) ? hidden.delete(name) : hidden.add(name);
+      draw();
+    };
+    chart.appendChild(leg); chart.appendChild(svg); chart.appendChild(tip);
+
+    const g = svg.querySelector("#g"), gl = g.querySelector("line");
+    svg.querySelector("#ov").onmousemove = (e) => {
+      if (!series.length) return;
+      const r = svg.getBoundingClientRect();
+      const xv = Math.round(xMin + ((e.clientX - r.left) * (W / r.width) - M.l) / pw * (xMax - xMin));
+      const x = xPix(xv);
+      g.style.display = ""; gl.setAttribute("x1", x); gl.setAttribute("x2", x);
+      const parts = series.map((s) => {
+        const p = s.points.find((q) => q.x === xv);
+        if (!p) return null;
+        const v = p.y > 0 ? "+" + p.y : "" + p.y;
+        return `<span style="color:${colorOf(s)}">${esc(s.name)} <b>${v}</b></span>`;
+      }).filter(Boolean);
+      if (!parts.length) { tip.style.opacity = 0; return; }
+      tip.innerHTML = `move ${xv} · ` + parts.join(" · ");
+      tip.style.left = (x * (r.width / W)) + "px";
+      tip.style.top = M.t * (r.height / H) + "px"; tip.style.opacity = 1;
+    };
+    svg.querySelector("#ov").onmouseleave = () => { tip.style.opacity = 0; g.style.display = "none"; };
+  }
+
+  draw();
 }
 
 // ------------------------------------------------- interactive review board
@@ -789,13 +932,14 @@ async function initConversion(host) {
       const d = await getJSON(`/api/conversion?user=${encodeURIComponent(meta.player)}` +
         `&format=${meta.format || ""}&n=${n}`);
       // render sections, then init any nested charts they created
-      pendingCharts = []; pendingEvals = [];
+      pendingCharts = []; pendingEvals = []; pendingEvalCurves = [];
       body.innerHTML = d.sections.map((s) =>
         `<h3>${esc(s.title)}</h3>` + s.widgets.map(renderWidget).join("")).join("");
       pendingCharts.forEach((c) => c.toolbar ? initChart($(c.id), c.series, c.agg)
         : buildRatingChart($(c.id), c.series));
-      pendingEvals.forEach((e) => buildEvalChart($(e.id), e.plies, e.moves));
-      pendingCharts = []; pendingEvals = [];
+      pendingEvals.forEach((e) => buildEvalChart($(e.id), e.plies, e.moves, e.me));
+      pendingEvalCurves.forEach((e) => buildEvalCurve($(e.id), e.groupings, e.default, e.y_label));
+      pendingCharts = []; pendingEvals = []; pendingEvalCurves = [];
     } catch (e) {
       body.innerHTML = `<p class="text" style="color:var(--loss)">${esc(e.message)}</p>`;
     }
@@ -856,6 +1000,7 @@ function renderSections() {
   pendingRecents = [];
   pendingConversions = [];
   pendingEvals = [];
+  pendingEvalCurves = [];
   pendingReviews = [];
   const doc = state.doc;
   const cats = categoryOrder(doc);
@@ -889,7 +1034,8 @@ function renderSections() {
     : buildRatingChart($(c.id), c.series));
   pendingRecents.forEach((id) => initRecent($(id)));
   pendingConversions.forEach((id) => initConversion($(id)));
-  pendingEvals.forEach((e) => buildEvalChart($(e.id), e.plies, e.moves));
+  pendingEvals.forEach((e) => buildEvalChart($(e.id), e.plies, e.moves, e.me));
+  pendingEvalCurves.forEach((e) => buildEvalCurve($(e.id), e.groupings, e.default, e.y_label));
   pendingReviews.forEach((r) => buildReviewBoard($(r.id), r.data));
 }
 

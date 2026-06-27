@@ -37,13 +37,28 @@ def line(series: list[dict], y_label: str = "", x_label: str = "") -> dict:
     return {"type": "line", "series": series, "y_label": y_label, "x_label": x_label}
 
 
-def evalbar(plies: list[dict], moves: list[str]) -> dict:
+def evalbar(plies: list[dict], moves: list[str], me: str = "") -> dict:
     """Per-ply engine evaluation graph.
 
-    plies: [{"ply":i, "cp":<white-pov centipawns, clamped>}]
+    plies: [{"ply":i, "cp":<white-pov centipawns, clamped>, "label":..}]
     moves: SAN list aligned to plies (for hover labels).
+    me:    the analysed player's colour ("white"/"black") so the UI can filter
+           flagged points to "mine" vs "the opponent's".
     """
-    return {"type": "eval", "plies": plies, "moves": moves}
+    return {"type": "eval", "plies": plies, "moves": moves, "me": me}
+
+
+def evalcurve(groupings: list[dict], default: str = "color",
+              y_label: str = "Eval (pawns, your POV)") -> dict:
+    """Average-evaluation-by-move chart with switchable groupings.
+
+    groupings: [{"key":.., "label":.., "series":[{"name":.., "color":?,
+                 "points":[{"x":<move number>, "y":<pawns>}]}]}].
+    The UI shows one button per grouping (e.g. Average / By colour / By result)
+    and draws the selected one's centred lines (zero baseline, symmetric range).
+    """
+    return {"type": "evalcurve", "groupings": groupings, "default": default,
+            "y_label": y_label}
 
 
 def barstack(rows: list[dict], palette: dict, title: str = "") -> dict:

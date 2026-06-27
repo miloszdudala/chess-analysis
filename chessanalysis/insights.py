@@ -113,7 +113,7 @@ def conversion_report(pairs, cp: int = 200) -> list[dict]:
                  if a.accuracy.get(g.color) is not None]
     cards = W.cards([
         W.card(f"{sum(game_accs) / len(game_accs):.1f}%" if game_accs else "—",
-               "Your accuracy", sub="Lichess-style (volatility-weighted)"),
+               "Your accuracy", sub="criticality-weighted (robust)"),
         W.card(f"{round(100 * moves_t3 / moves_n)}%" if moves_n else "—",
                "Top-3 match", sub="your moves in the engine's top 3"),
         W.card(f"{round(100 * won / reached_win)}%" if reached_win else "—",
@@ -152,6 +152,101 @@ def conversion_report(pairs, cp: int = 200) -> list[dict]:
         {"title": "Accuracy by position (your move)",
          "widgets": [table(state_agg, [s[0] for s in STATES], "Position")]},
     ]
+
+
+# colours for the eval-curve series
+_C_ALL = "#1d6f6a"
+_C_WHITE, _C_BLACK = "#1d6f6a", "#b06a2c"
+_C_WIN, _C_DRAW, _C_LOSS = W.WDL_PALETTE["win"], "#b9b09c", W.WDL_PALETTE["loss"]
+
+
+def _avg_eval_series(pairs, label_of, order, max_moves: int = 60) -> list[dict]:
+    """Average evaluation (your POV) per move number, grouped by `label_of(game)`.
+
+    order: [(label, color)] fixing series order/colour. A move number is plotted
+    for a group only while ≥20% of that group's games are still going, so the
+    long tail doesn't wander on a handful of games. Evals are clamped to ±10
+    pawns so one mate score can't dominate the mean.
+    """
+    sums, cnts, gcount = {}, {}, {}
+    for g, a in pairs:
+        if not a.evals:
+            continue
+        lab = label_of(g)
+        if lab is None:
+            continue
+        gcount[lab] = gcount.get(lab, 0) + 1
+        s, c = sums.setdefault(lab, {}), cnts.setdefault(lab, {})
+        sgn = 1 if g.color == "white" else -1
+        for ply in range(1, len(a.evals)):          # skip the start position
+            mv = (ply + 1) // 2
+            if mv > max_moves:
+                break
+            e = max(-1000, min(1000, sgn * a.evals[ply]))
+            s[mv] = s.get(mv, 0.0) + e
+            c[mv] = c.get(mv, 0) + 1
+    series = []
+    for lab, color, *rest in order:
+        if lab not in sums:
+            continue
+        dash = bool(rest[0]) if rest else False
+        floor = max(4, 0.4 * gcount[lab])            # ~20% of games (2 plies each)
+        pts = [{"x": mv, "y": round(sums[lab][mv] / cnts[lab][mv] / 100, 2)}
+               for mv in sorted(sums[lab]) if cnts[lab][mv] >= floor]
+        if len(pts) >= 2:
+            series.append({"name": lab, "color": color, "dash": dash, "points": pts})
+    return series
+
+
+def eval_curve(pairs) -> list[dict]:
+    """Average evaluation (your POV) at each move number, with switchable splits.
+
+    One chart, three groupings: the overall average, split by colour played, and
+    split by result (won / drawn / lost) — so you can see, e.g., that your losses
+    drift negative from the opening while your wins build up from the middlegame.
+    """
+    res_label = {"win": "Won", "draw": "Drawn", "loss": "Lost"}
+    overall = _avg_eval_series(pairs, lambda g: "All games", [("All games", _C_ALL)])
+    by_color = _avg_eval_series(
+        pairs, lambda g: "As White" if g.color == "white" else "As Black",
+        [("As White", _C_WHITE), ("As Black", _C_BLACK)])
+    by_result = _avg_eval_series(
+        pairs, lambda g: res_label.get(g.outcome),
+        [("Won", _C_WIN), ("Drawn", _C_DRAW), ("Lost", _C_LOSS)])
+
+    # colour × result: result sets the line colour, colour-played the style
+    # (White solid, Black dashed) — up to six series.
+    def colres_label(g):
+        if g.outcome not in res_label:
+            return None
+        return f"{'White' if g.color == 'white' else 'Black'} · {res_label[g.outcome]}"
+    by_both = _avg_eval_series(pairs, colres_label, [
+        ("White · Won", _C_WIN, False), ("White · Drawn", _C_DRAW, False),
+        ("White · Lost", _C_LOSS, False), ("Black · Won", _C_WIN, True),
+        ("Black · Drawn", _C_DRAW, True), ("Black · Lost", _C_LOSS, True),
+    ])
+
+    groupings = []
+    if overall:
+        groupings.append({"key": "all", "label": "Average", "series": overall})
+    if by_color:
+        groupings.append({"key": "color", "label": "By colour", "series": by_color})
+    if by_result:
+        groupings.append({"key": "result", "label": "By result", "series": by_result})
+    if len(by_both) > max(len(by_color), len(by_result)):
+        groupings.append({"key": "colres", "label": "Colour × result",
+                          "series": by_both})
+    if not groupings:
+        return []
+    default = "color" if by_color else groupings[0]["key"]
+    return [{"title": "Average evaluation by move",
+             "widgets": [W.text("Your mean engine evaluation (in pawns, from your "
+                                 "side's point of view) at each move number — how "
+                                 "your typical game drifts for and against you. "
+                                 "Switch between the overall average, by colour, by "
+                                 "result, or colour × result (White solid, Black "
+                                 "dashed)."),
+                         W.evalcurve(groupings, default=default)]}]
 
 
 def accuracy_trend(pairs) -> list[dict]:

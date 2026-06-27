@@ -77,7 +77,7 @@ def test_top3_match_flag_and_aggregate():
     assert a.top3["white"] == 100.0 and a.top3["black"] == 0.0
 
 
-def test_game_accuracy_blend_penalises_a_blunder():
+def test_game_accuracy_penalises_a_blunder():
     clean = eng._derive(build_raw(["e2e4", "e7e5", "g1f3"], [10, 10, 10, 10]),
                         depth=10, engine_name="x")
     assert clean.accuracy["white"] > 95          # flat eval -> near-perfect
@@ -85,6 +85,18 @@ def test_game_accuracy_blend_penalises_a_blunder():
     blund = eng._derive(build_raw(["e2e4", "e7e5", "f1c4"], [10, 10, 10, -900]),
                         depth=10, engine_name="x")
     assert blund.accuracy["white"] < clean.accuracy["white"]
+
+
+def test_single_final_blunder_dents_but_does_not_collapse_accuracy():
+    """Many strong moves + one game-ending blunder must stay high-ish, not crash
+    to ~0 the way a naive harmonic mean would on a single 0% move."""
+    import types
+    moves = [types.SimpleNamespace(ply=p, color="white", accuracy=98.0)
+             for p in range(1, 20, 2)]                       # 10 strong moves
+    moves.append(types.SimpleNamespace(ply=21, color="white", accuracy=0.0))
+    evals = [30] * 21 + [-900]                               # quiet, then a crash
+    acc = eng._game_accuracy(evals, moves)
+    assert 70 < acc["white"] < 90                            # dented, not collapsed
 
 
 def test_derive_handles_missing_top_moves():

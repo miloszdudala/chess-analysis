@@ -52,6 +52,66 @@ def test_accuracy_trend_needs_two_points():
     assert insights.accuracy_trend([(_G("2026.01.01", "white"), a)]) == []
 
 
+def _ec_pair(color, outcome, evals):
+    g = FakeGame(color=color)
+    g.outcome = outcome
+    return (g, _analysis([], evals))
+
+
+def _eval_curve_widget(pairs):
+    out = insights.eval_curve(pairs)
+    assert out and out[0]["title"] == "Average evaluation by move"
+    return [w for w in out[0]["widgets"] if w["type"] == "evalcurve"][0]
+
+
+def _grouping(curve, key):
+    return next(g for g in curve["groupings"] if g["key"] == key)
+
+
+def test_eval_curve_splits_by_color_and_clamps_mate_scores():
+    # 5 games each colour so the per-move coverage floor is cleared
+    wpairs = [_ec_pair("white", "win", [0, 100, 200, 9000, 9000]) for _ in range(5)]
+    # white-POV evals positive -> Black (the user here) is worse -> negative POV
+    bpairs = [_ec_pair("black", "loss", [0, 100, 200, 300, 300]) for _ in range(5)]
+    curve = _eval_curve_widget(wpairs + bpairs)
+    series = {s["name"]: s["points"] for s in _grouping(curve, "color")["series"]}
+    assert set(series) == {"As White", "As Black"}
+    assert series["As White"][0]["y"] > 0 and series["As Black"][0]["y"] < 0
+    # the 9000cp (≈mate) eval must be clamped, never reaching ±90 pawns
+    assert all(abs(p["y"]) <= 10 for pts in series.values() for p in pts)
+
+
+def test_eval_curve_splits_by_result():
+    # enough games per result bucket to clear the coverage floor
+    won = [_ec_pair("white", "win", [0, 100, 250, 400, 600]) for _ in range(5)]
+    lost = [_ec_pair("white", "loss", [0, -50, -200, -400, -600]) for _ in range(5)]
+    curve = _eval_curve_widget(won + lost)
+    by_result = {s["name"]: s["points"] for s in _grouping(curve, "result")["series"]}
+    assert {"Won", "Lost"} <= set(by_result)
+    assert by_result["Won"][-1]["y"] > by_result["Lost"][-1]["y"]
+    # also exposes an overall-average grouping; default is the colour split
+    assert {g["key"] for g in curve["groupings"]} >= {"all", "color", "result"}
+
+
+def test_eval_curve_colour_times_result():
+    pairs = []
+    for color in ("white", "black"):
+        for outcome, ev in (("win", [0, 100, 250, 400, 600]),
+                            ("loss", [0, -50, -200, -400, -600])):
+            pairs += [_ec_pair(color, outcome, ev) for _ in range(5)]
+    curve = _eval_curve_widget(pairs)
+    colres = _grouping(curve, "colres")
+    by_name = {s["name"]: s for s in colres["series"]}
+    assert {"White · Won", "White · Lost", "Black · Won", "Black · Lost"} <= set(by_name)
+    # Black series are dashed, White solid
+    assert by_name["Black · Won"]["dash"] is True
+    assert by_name["White · Won"]["dash"] is False
+
+
+def test_eval_curve_empty():
+    assert insights.eval_curve([]) == []
+
+
 def test_cascading_error_probability():
     # white errors on plies 1 and 3 (consecutive own moves), ok on 5
     moves = [mev(1, "white", "blunder"), mev(2, "black"),

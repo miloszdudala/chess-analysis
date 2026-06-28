@@ -309,7 +309,10 @@ _CSS = """
   .chart-grid { stroke:var(--line); stroke-width:1; }
   .chart-wrap svg text { fill:var(--mut); font-size:10px; font-family:var(--mono); }
   .chart-area { fill:var(--accent); opacity:.08; }
+  .chart-area.muted { opacity:.04; }
   .chart-line { fill:none; stroke:var(--accent); stroke-width:1.6; }
+  .chart-line.muted { stroke:#b9b4a8; stroke-width:1.2; }
+  .chart-line-ma { fill:none; stroke:var(--accent); stroke-width:2.4; stroke-linejoin:round; }
   .chart-guide { stroke:var(--mut); stroke-dasharray:3 3; }
   .chart-dot { fill:var(--panel); stroke:var(--accent); stroke-width:2; }
   .chart-brush { fill:var(--accent); opacity:.12; }

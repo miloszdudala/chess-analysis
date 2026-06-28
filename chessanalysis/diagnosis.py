@@ -24,7 +24,7 @@ from .enrich.engine import MATE_CP
 BLUNDER_WP, MISTAKE_WP = 20.0, 10.0
 # Positional-drift band: per-move centipawn loss that counts as a "small bleed",
 # and how many in a row make a drift episode (mirrors metrics.game.review).
-DRIFT_LO, DRIFT_HI, DRIFT_MIN = 15, 90, 4
+DRIFT_LO, DRIFT_HI, DRIFT_MIN = 30, 90, 4
 # A single move must own at least this share of the total win% you lost to be
 # called *the* blunder rather than one error among several.
 DOMINATE = 0.45

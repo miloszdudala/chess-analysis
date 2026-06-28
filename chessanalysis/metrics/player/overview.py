@@ -36,4 +36,6 @@ def rating_trend(ctx):
            for g in ctx.games if g.user_elo]
     if len(pts) < 2:
         return None
-    return W.line([{"name": ctx.player, "points": pts}], y_label="Elo")
+    line = W.line([{"name": ctx.player, "points": pts}], y_label="Elo")
+    line["ma"] = True            # overlay a moving-average trend line
+    return line

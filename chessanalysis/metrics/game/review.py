@@ -140,9 +140,9 @@ def move_quality(ctx):
 
 # --- tactical misses vs. positional drift -----------------------------------
 # A tactical miss is one move that drops a lot at once (a missed forced line);
-# positional drift is a run of consecutive small losses — slow strategic decline.
+# positional drift is a run of consecutive small-but-real losses — slow decline.
 TACTICAL_CP = 150               # single-move centipawn loss = a tactical miss
-DRIFT_LO, DRIFT_HI = 15, 90     # per-move loss band that counts as "small"
+DRIFT_LO, DRIFT_HI = 30, 90     # per-move loss band: real slips, not near-best noise
 DRIFT_MIN = 4                   # this many small losses in a row = a drift episode
 
 
@@ -184,8 +184,9 @@ def error_profile(ctx):
     explain = W.text(
         f"Tactical misses are single moves that lose ≥{TACTICAL_CP / 100:.1f} "
         f"pawns at once (a missed forced sequence). Positional drift is "
-        f"{DRIFT_MIN}+ moves in a row each bleeding {DRIFT_LO}–{DRIFT_HI}cp — "
-        f"slow strategic decline rather than a single blunder.")
+        f"{DRIFT_MIN}+ moves in a row each giving up {DRIFT_LO}–{DRIFT_HI}cp — a "
+        f"sustained run of slips that bleeds the position away gradually rather "
+        f"than in one blunder.")
 
     # narrative for the analysed player's own side
     me = ctx.game.color

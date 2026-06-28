@@ -85,11 +85,13 @@ def test_quality_counts(sample_analysis):
 
 def test_drift_runs():
     mk = lambda cp: types.SimpleNamespace(cp_loss=cp, ply=1, color="white")
-    assert len(_drift_runs([mk(20), mk(30), mk(40), mk(50)])) == 1
+    assert len(_drift_runs([mk(35), mk(40), mk(50), mk(60)])) == 1
     # a big swing breaks the run; only the trailing 4-long run survives
-    runs = _drift_runs([mk(20), mk(30), mk(200), mk(40), mk(50), mk(60), mk(70)])
+    runs = _drift_runs([mk(35), mk(40), mk(200), mk(40), mk(50), mk(60), mk(70)])
     assert len(runs) == 1 and len(runs[0]) == 4
-    assert _drift_runs([mk(20), mk(30), mk(40)]) == []        # below DRIFT_MIN
+    assert _drift_runs([mk(35), mk(40), mk(50)]) == []        # below DRIFT_MIN
+    # moves losing under 30cp are now too small to count as drift
+    assert _drift_runs([mk(20), mk(25), mk(28), mk(20)]) == []
 
 
 def test_error_profile_flags_tactical_miss(sample_analysis):

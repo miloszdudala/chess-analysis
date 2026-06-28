@@ -172,7 +172,7 @@ const WIDGETS = {
   line: (w) => {
     const id = "chart-" + Math.random().toString(36).slice(2);
     pendingCharts.push({ id, series: w.series, toolbar: w.toolbar !== false,
-                         agg: w.agg || "last" });
+                         agg: w.agg || "last", ma: !!w.ma });
     return `<div class="chart-host" id="${id}"></div>`;
   },
   recent: () => {
@@ -214,7 +214,7 @@ function renderWidget(w) {
 
 // ---------------------------------------------------------- interactive chart
 
-function buildRatingChart(host, series) {
+function buildRatingChart(host, series, ma = false) {
   const pts = (series[0] && series[0].points) || [];
   const data = pts.map((p, i) => ({ i, date: p.x, y: p.y }));
   if (data.length < 2) return;
@@ -224,10 +224,39 @@ function buildRatingChart(host, series) {
   const n = data.length;
   let dom = [0, n - 1], curYd = [0, 1], brushing = false, startX = 0;
 
+  // trailing moving average (expanding at the start so every point has a value)
+  const maWin = ma ? Math.min(30, Math.max(3, Math.round(n / 8))) : 0;
+  const maY = ma ? data.map((_, i) => {
+    const lo = Math.max(0, i - maWin + 1);
+    let s = 0;
+    for (let j = lo; j <= i; j++) s += data[j].y;
+    return s / (i - lo + 1);
+  }) : null;
+
   const NS = "http://www.w3.org/2000/svg";
   const svg = document.createElementNS(NS, "svg");
   svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
   const tip = document.createElement("div"); tip.className = "chart-tip";
+  const show = { raw: true, ma: true };   // click the legend to toggle each line
+  if (ma) {
+    const leg = document.createElement("div"); leg.className = "evc-legend";
+    const renderLeg = () => {
+      leg.innerHTML =
+        `<button class="evc-key${show.raw ? "" : " off"}" data-k="raw">` +
+        `<span class="evc-sw" style="background:#b9b4a8"></span>Rating</button>` +
+        `<button class="evc-key${show.ma ? "" : " off"}" data-k="ma">` +
+        `<span class="evc-sw" style="background:var(--accent)"></span>${maWin}-game average</button>`;
+    };
+    renderLeg();
+    leg.onclick = (e) => {
+      const b = e.target.closest(".evc-key"); if (!b) return;
+      const k = b.dataset.k;
+      if (show[k] && (show.raw ? 1 : 0) + (show.ma ? 1 : 0) <= 1) return;  // keep one
+      show[k] = !show[k];
+      renderLeg(); draw();
+    };
+    host.appendChild(leg);
+  }
   host.appendChild(svg); host.appendChild(tip);
 
   const visible = () => data.filter((d) => d.i >= Math.ceil(dom[0]) && d.i <= Math.floor(dom[1]));
@@ -237,7 +266,11 @@ function buildRatingChart(host, series) {
 
   function draw() {
     const vs = visible();
-    let lo = Math.min(...vs.map((d) => d.y)), hi = Math.max(...vs.map((d) => d.y));
+    const vals = [];
+    if (show.raw) vs.forEach((d) => vals.push(d.y));
+    if (maY && show.ma) vs.forEach((d) => vals.push(maY[d.i]));
+    if (!vals.length) vs.forEach((d) => vals.push(d.y));
+    let lo = Math.min(...vals), hi = Math.max(...vals);
     if (lo === hi) { lo -= 10; hi += 10; }
     const pad = (hi - lo) * 0.12 || 8; curYd = [lo - pad, hi + pad];
     let s = "";
@@ -251,11 +284,18 @@ function buildRatingChart(host, series) {
       const idx = Math.round(dom[0] + ((dom[1] - dom[0]) * t) / ticks), d = data[idx];
       if (d) s += `<text x="${xPix(idx).toFixed(1)}" y="${H - 8}" text-anchor="middle">${esc(d.date.slice(5))}</text>`;
     }
-    const pp = vs.map((d) => `${xPix(d.i).toFixed(1)},${yPix(d.y).toFixed(1)}`);
-    if (pp.length) {
+    if (vs.length) {
       const base = (M.t + ph).toFixed(1);
-      s += `<polygon class="chart-area" points="${xPix(vs[0].i).toFixed(1)},${base} ${pp.join(" ")} ${xPix(vs[vs.length - 1].i).toFixed(1)},${base}"/>`;
-      s += `<polyline class="chart-line" points="${pp.join(" ")}"/>`;
+      if (show.raw) {
+        const pp = vs.map((d) => `${xPix(d.i).toFixed(1)},${yPix(d.y).toFixed(1)}`);
+        const dim = ma ? " muted" : "";   // de-emphasise the raw line under the MA
+        s += `<polygon class="chart-area${dim}" points="${xPix(vs[0].i).toFixed(1)},${base} ${pp.join(" ")} ${xPix(vs[vs.length - 1].i).toFixed(1)},${base}"/>`;
+        s += `<polyline class="chart-line${dim}" points="${pp.join(" ")}"/>`;
+      }
+      if (maY && show.ma) {
+        const mp = vs.map((d) => `${xPix(d.i).toFixed(1)},${yPix(maY[d.i]).toFixed(1)}`);
+        s += `<polyline class="chart-line-ma" points="${mp.join(" ")}"/>`;
+      }
     }
     s += `<g id="guide" style="display:none"><line class="chart-guide" y1="${M.t}" y2="${M.t + ph}"/>` +
       `<circle class="chart-dot" r="4"/></g>`;
@@ -279,14 +319,20 @@ function buildRatingChart(host, series) {
       let idx = Math.round(dom[0] + ((px - M.l) / pw) * (dom[1] - dom[0]));
       idx = Math.max(Math.ceil(dom[0]), Math.min(Math.floor(dom[1]), idx));
       const d = data[idx]; if (!d) return;
-      const x = xPix(idx), y = yPix(d.y);
+      const yVal = show.raw ? d.y : maY[idx];     // pin the marker to a visible line
+      const x = xPix(idx), y = yPix(yVal);
       guide.style.display = ""; gl.setAttribute("x1", x); gl.setAttribute("x2", x);
       dot.setAttribute("cx", x); dot.setAttribute("cy", y);
-      const prev = data[idx - 1];
-      const ch = prev ? Math.round((d.y - prev.y) * 10) / 10 : null;   // avoid float dust
-      const chTxt = ch === null ? "" : ch >= 0 ?
-        `<span class="up">▲ +${ch}</span>` : `<span class="dn">▼ ${ch}</span>`;
-      tip.innerHTML = `${esc(d.date)} · <b>${d.y}</b> ${chTxt}`;
+      let info = "";
+      if (show.raw) {
+        const prev = data[idx - 1];
+        const ch = prev ? Math.round((d.y - prev.y) * 10) / 10 : null;   // avoid float dust
+        const chTxt = ch === null ? "" : ch >= 0 ?
+          `<span class="up">▲ +${ch}</span>` : `<span class="dn">▼ ${ch}</span>`;
+        info += `<b>${d.y}</b> ${chTxt}`;
+      }
+      if (maY && show.ma) info += `${show.raw ? " · " : ""}avg <b>${Math.round(maY[idx])}</b>`;
+      tip.innerHTML = `${esc(d.date)} · ${info}`;
       const r = svg.getBoundingClientRect();
       tip.style.left = (x * (r.width / W)) + "px";
       tip.style.top = (y * (r.height / H)) + "px"; tip.style.opacity = 1;
@@ -935,8 +981,8 @@ async function initConversion(host) {
       pendingCharts = []; pendingEvals = []; pendingEvalCurves = [];
       body.innerHTML = d.sections.map((s) =>
         `<h3>${esc(s.title)}</h3>` + s.widgets.map(renderWidget).join("")).join("");
-      pendingCharts.forEach((c) => c.toolbar ? initChart($(c.id), c.series, c.agg)
-        : buildRatingChart($(c.id), c.series));
+      pendingCharts.forEach((c) => c.toolbar ? initChart($(c.id), c.series, c.agg, c.ma)
+        : buildRatingChart($(c.id), c.series, c.ma));
       pendingEvals.forEach((e) => buildEvalChart($(e.id), e.plies, e.moves, e.me));
       pendingEvalCurves.forEach((e) => buildEvalCurve($(e.id), e.groupings, e.default, e.y_label));
       pendingCharts = []; pendingEvals = []; pendingEvalCurves = [];
@@ -958,7 +1004,7 @@ async function gotoGame(id) {
   } catch (e) { setStatus(e.message, true); }
 }
 
-function initChart(host, series, agg = "last") {
+function initChart(host, series, agg = "last", ma = false) {
   let gran = "game";
   const bar = document.createElement("div"); bar.className = "chart-toolbar";
   const wrap = document.createElement("div"); wrap.className = "chart-wrap";
@@ -978,7 +1024,7 @@ function initChart(host, series, agg = "last") {
   host.appendChild(bar); host.appendChild(wrap); host.appendChild(hint);
   function render() {
     wrap.innerHTML = "";
-    buildRatingChart(wrap, [{ name: series[0].name, points: aggregate(series[0].points, gran, agg) }]);
+    buildRatingChart(wrap, [{ name: series[0].name, points: aggregate(series[0].points, gran, agg) }], ma);
   }
   render();
 }
@@ -1030,8 +1076,8 @@ function renderSections() {
   $("result").innerHTML = `<h1>${esc(doc.title)}${link}</h1>` +
     (doc.subtitle ? `<p class="sub-title">${esc(doc.subtitle)}</p>` : "") + html;
   document.title = doc.title + " · Chess Analyzer";
-  pendingCharts.forEach((c) => c.toolbar ? initChart($(c.id), c.series, c.agg)
-    : buildRatingChart($(c.id), c.series));
+  pendingCharts.forEach((c) => c.toolbar ? initChart($(c.id), c.series, c.agg, c.ma)
+    : buildRatingChart($(c.id), c.series, c.ma));
   pendingRecents.forEach((id) => initRecent($(id)));
   pendingConversions.forEach((id) => initConversion($(id)));
   pendingEvals.forEach((e) => buildEvalChart($(e.id), e.plies, e.moves, e.me));

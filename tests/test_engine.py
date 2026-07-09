@@ -87,16 +87,21 @@ def test_game_accuracy_penalises_a_blunder():
     assert blund.accuracy["white"] < clean.accuracy["white"]
 
 
-def test_single_final_blunder_dents_but_does_not_collapse_accuracy():
-    """Many strong moves + one game-ending blunder must stay high-ish, not crash
-    to ~0 the way a naive harmonic mean would on a single 0% move."""
+def test_game_accuracy_follows_lichess_blend():
+    """Lichess method: a clean game scores high, while one blunder in a sharp
+    spot is felt through both the harmonic mean and the volatility weighting."""
     import types
-    moves = [types.SimpleNamespace(ply=p, color="white", accuracy=98.0)
-             for p in range(1, 20, 2)]                       # 10 strong moves
-    moves.append(types.SimpleNamespace(ply=21, color="white", accuracy=0.0))
-    evals = [30] * 21 + [-900]                               # quiet, then a crash
-    acc = eng._game_accuracy(evals, moves)
-    assert 70 < acc["white"] < 90                            # dented, not collapsed
+    evals = [20, 40, 10, 60, 30, 50, 20]                     # a real back-and-forth
+    strong = [types.SimpleNamespace(ply=p, color="white", accuracy=96.0)
+              for p in (1, 3, 5)]
+    clean = eng._game_accuracy(evals, strong)["white"]
+    assert clean > 90                                        # all strong -> high
+
+    with_blunder = [types.SimpleNamespace(ply=1, color="white", accuracy=96.0),
+                    types.SimpleNamespace(ply=3, color="white", accuracy=15.0),
+                    types.SimpleNamespace(ply=5, color="white", accuracy=96.0)]
+    dented = eng._game_accuracy(evals, with_blunder)["white"]
+    assert dented < 60 and dented < clean - 20               # the blunder counts
 
 
 def test_derive_handles_missing_top_moves():

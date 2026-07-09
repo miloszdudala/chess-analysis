@@ -32,6 +32,17 @@ def wdl_table(label_col: str, rows: list[dict]) -> dict:
     return {"type": "wdl_table", "label_col": label_col, "rows": rows}
 
 
+def drilltable(columns: list[str], rows: list[dict]) -> dict:
+    """A table whose rows expand to reveal the individual games behind them.
+
+    columns: header labels for each row's `cells`.
+    rows: [{"cells":[..], "games":[{"id","ply","date","opponent","outcome",
+             "note"}]}] — clicking a row toggles its games; clicking a game
+    opens that game's review positioned at `ply` (the board at that moment).
+    """
+    return {"type": "drilltable", "columns": columns, "rows": rows}
+
+
 def line(series: list[dict], y_label: str = "", x_label: str = "") -> dict:
     """series: [{"name":.., "points":[y0,y1,..] or [{"x":..,"y":..}]}]."""
     return {"type": "line", "series": series, "y_label": y_label, "x_label": x_label}

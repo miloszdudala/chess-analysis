@@ -62,47 +62,48 @@ def _stddev(xs) -> float:
     return (sum((x - m) ** 2 for x in xs) / len(xs)) ** 0.5
 
 
-WEIGHT_FLOOR = 0.5          # a quiet, accurate move still counts a little
-MAX_WEIGHT_SHARE = 0.25     # no single move may own more than this of the total
+def _weighted_mean(values, weights) -> float:
+    total = sum(weights)
+    if total <= 0:                     # a dead-flat game: weight every move alike
+        return sum(values) / len(values)
+    return sum(v * w for v, w in zip(values, weights)) / total
 
 
-def _capped_weighted_mean(values, weights) -> float:
-    """Weighted mean, but iteratively cap each weight at MAX_WEIGHT_SHARE of the
-    running total — so one wild swing can't single-handedly define the score."""
-    w = list(weights)
-    for _ in range(6):
-        cap = sum(w) * MAX_WEIGHT_SHARE
-        capped = [min(x, cap) for x in w]
-        if capped == w:
-            break
-        w = capped
-    total = sum(w) or 1.0
-    return sum(v * x for v, x in zip(values, w)) / total
+def _harmonic_mean(values) -> float:
+    # floor each term at 1.0 so a single clamped-0% move can't make the
+    # reciprocal sum diverge; 1.0 is negligible against real accuracies.
+    denom = sum(1.0 / max(v, 1.0) for v in values)
+    return len(values) / denom if denom else 0.0
 
 
 def _game_accuracy(evals, moves) -> dict:
-    """Per-colour game accuracy, robust to a single catastrophic move.
+    """Per-colour game accuracy, following the Lichess method.
 
-    Blends two views of the per-move accuracies (each from the Lichess win%
-    model):
-      * the plain mean — every move counts equally;
-      * a *criticality-weighted* mean — each move weighted by how volatile the
+    Each side's per-move accuracies (already from the Lichess win% model) are
+    combined two ways and averaged:
+      * a volatility-weighted mean — each move weighted by how sharp the
         position was (stddev of the white win% over a sliding window), so the
-        moments that actually decided the game count more.
-    Weights are floored (quiet moves still count) and capped so no single move
-    owns more than a quarter of the total — a lone game-ending blunder dents the
-    score without collapsing it (an unweighted/harmonic mean would zero out on
-    one 0% move). The two views are averaged.
+        moments that actually decided the game count most;
+      * the harmonic mean — which pulls the score down toward the low outliers,
+        so one blunder in an otherwise clean game is felt, matching what players
+        expect the number to mean.
+    The window size scales with the length of the game, as Lichess does. This is
+    a faithful port of https://lichess.org/page/accuracy (the game-accuracy
+    section), not a naive average of move accuracies.
     """
     out = {"white": None, "black": None}
     if not moves:
         return out
     wp = [win_prob(e) for e in evals]              # white-POV win%, len = plies+1
-    window = max(2, min(8, len(wp) // 10))
-    weights = []                                   # one per played move (by ply)
-    for i in range(1, len(wp)):
-        lo = max(0, i - window + 1)
-        weights.append(max(_stddev(wp[lo:i + 1]), WEIGHT_FLOOR))
+    window = max(2, min(8, (len(wp) - 1) // 10))   # by move count, as Lichess
+    # one volatility weight per move: the stddev of the win% over a window
+    # ending at that move, front-padded with the first full window so the early
+    # moves aren't understated by a truncated window.
+    weights = []
+    for j in range(1, len(wp)):
+        start = j + 1 - window
+        win = wp[:window] if start < 0 else wp[start:j + 1]
+        weights.append(_stddev(win))
     acc = {"white": [], "black": []}
     wts = {"white": [], "black": []}
     for m in moves:
@@ -113,9 +114,9 @@ def _game_accuracy(evals, moves) -> dict:
     for c in ("white", "black"):
         if not acc[c]:
             continue
-        plain = sum(acc[c]) / len(acc[c])
-        weighted = _capped_weighted_mean(acc[c], wts[c])
-        out[c] = round((plain + weighted) / 2, 1)
+        weighted = _weighted_mean(acc[c], wts[c])
+        harmonic = _harmonic_mean(acc[c])
+        out[c] = round((weighted + harmonic) / 2, 1)
     return out
 
 

@@ -101,14 +101,38 @@ def test_drift_is_a_secondary_factor_of_a_blunder_loss():
     assert dg.primary == "blunder" and "drift" in dg.factors
 
 
-# --- wins -------------------------------------------------------------------
+def test_one_blunder_loss_despite_accumulated_noise():
+    # a long game full of tiny sub-mistake losses must not drown out the one
+    # move that actually decided it (dominance is judged vs significant errors)
+    noise = [mev(p, "white", wp=3.0, cpl=15) for p in range(1, 40, 2)]
+    moves = noise + [mev(41, "white", "blunder", wp=34.0, cpl=430),
+                     mev(42, "black")]
+    evals = [20] * 41 + [-410, -410]
+    a = analysis(moves, evals)
+    dg = dx.diagnose(DGame("loss"), a)
+    assert dg.primary == "blunder"
+
+
+# --- wins (same categories as losses, diagnosed on the opponent) -------------
 
 def test_opponent_blunder_win():
     moves = [mev(1, "white"), mev(2, "black", "blunder", wp=45.0, cpl=500),
              mev(3, "white")]
     a = analysis(moves, [20, 20, 600, 600])
     dg = dx.diagnose(DGame("win"), a)
-    assert dg.primary == "opp_blunder"
+    assert dg.primary == "blunder"
+    assert dg.headline == dx.WIN_REASONS["blunder"]
+
+
+def test_one_opponent_blunder_win_despite_accumulated_noise():
+    # mirror of the loss case: opponent noise must not hide their one blunder
+    noise = [mev(p, "black", wp=3.0, cpl=15) for p in range(2, 41, 2)]
+    moves = noise + [mev(42, "black", "blunder", wp=30.0, cpl=420),
+                     mev(43, "white")]
+    evals = [20] * 42 + [450, 450]
+    a = analysis(moves, evals)
+    dg = dx.diagnose(DGame("win"), a)
+    assert dg.primary == "blunder"
 
 
 def test_comeback_win():
@@ -116,22 +140,25 @@ def test_comeback_win():
              mev(3, "white")]
     a = analysis(moves, [20, -400, -400, 600])
     dg = dx.diagnose(DGame("win"), a)
-    assert dg.primary == "comeback"
+    assert dg.primary == "threw_away"
+    assert dg.headline == dx.WIN_REASONS["threw_away"]
 
 
-def test_steady_win():
+def test_outplayed_win():
+    # no opponent error of note, you led throughout -> you outplayed them
     moves = [mev(p, "white") for p in (1, 3, 5)] + [mev(p, "black") for p in (2, 4, 6)]
     a = analysis(moves, [150, 160, 170, 180, 190, 200, 210],
                  acc={"white": 92.0, "black": 70.0})
     dg = dx.diagnose(DGame("win"), a)
-    assert dg.primary == "steady"
+    assert dg.primary == "outplayed"
+    assert "92%" in dg.detail and "70%" in dg.detail
 
 
 def test_flag_win():
     moves = [mev(1, "white"), mev(2, "black")]
     a = analysis(moves, [20, 10, -30])
     dg = dx.diagnose(DGame("win", termination="Alice won on time"), a)
-    assert dg.primary == "flag_win"
+    assert dg.primary == "flagged"
 
 
 def test_won_on_time_from_worse_position_is_not_a_comeback():
@@ -139,7 +166,7 @@ def test_won_on_time_from_worse_position_is_not_a_comeback():
     moves = [mev(1, "white"), mev(2, "black"), mev(3, "white"), mev(4, "black")]
     a = analysis(moves, [20, 300, 300, -900, -700])
     dg = dx.diagnose(DGame("win", termination="md won on time"), a)
-    assert dg.primary == "flag_win"
+    assert dg.primary == "flagged"
     assert "losing position" in dg.detail and "opp_time" not in dg.factors
 
 
@@ -150,7 +177,7 @@ def test_comeback_requires_recovering_on_the_board():
              mev(3, "white")]
     a = analysis(moves, [20, -400, -400, 600])
     dg = dx.diagnose(DGame("win", termination="md won on time"), a)
-    assert dg.primary == "comeback"
+    assert dg.primary == "threw_away"
 
 
 # --- draws ------------------------------------------------------------------
@@ -178,7 +205,7 @@ def test_none_when_no_data():
 
 def test_outcome_reasons_aggregation():
     blunder = analysis([mev(1, "white", "blunder", wp=40.0, cpl=420)], [20, -400])
-    steady = analysis([mev(1, "white")], [200, 210],
+    steady = analysis([mev(1, "white"), mev(2, "black")], [200, 210, 220],
                       acc={"white": 90.0, "black": 70.0})
     pairs = [(DGame("loss"), blunder), (DGame("win"), steady)]
     out = insights.outcome_reasons(pairs)
@@ -186,7 +213,7 @@ def test_outcome_reasons_aggregation():
     labels = {c["label"]: c["value"]
               for w in out[0]["widgets"] if w["type"] == "cards" for c in w["items"]}
     assert labels["Top reason you lose"] == dx.LOSS_REASONS["blunder"]
-    assert labels["Top reason you win"] == dx.WIN_REASONS["steady"]
+    assert labels["Top reason you win"] == dx.WIN_REASONS["outplayed"]
     # drill-down: a "reasons" widget per outcome, each group carrying its games
     reasons = [w for w in out[0]["widgets"] if w["type"] == "reasons"]
     by_label = {w["label"]: w for w in reasons}

@@ -55,6 +55,32 @@ const WIDGETS = {
     return `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
   },
 
+  drilltable: (w) => {
+    const head = `<th></th>` + w.columns.map((c) => `<th>${esc(c)}</th>`).join("");
+    const body = w.rows.map((r, i) => {
+      const cells = r.cells.map((c) => `<td>${cell(c)}</td>`).join("");
+      const games = r.games || [];
+      const has = games.length > 0;
+      const gameRows = games.map((g) => {
+        const res = g.outcome === "win" ? "✓" : g.outcome === "loss" ? "✗" : "=";
+        const rc = g.outcome === "win" ? "res-win" : g.outcome === "loss" ? "res-loss" : "";
+        return `<tr class="rrow" data-game-id="${esc(g.id)}" data-ply="${g.ply ?? ""}">` +
+          `<td class="${rc}">${res}</td><td>${esc(g.date)}</td>` +
+          `<td>${esc(g.opponent || "?")}</td>` +
+          `<td class="reason-note">${esc(g.note || "")}</td></tr>`;
+      }).join("");
+      const main = `<tr class="dt-row${has ? " dt-open" : ""}" data-row="${i}">` +
+        `<td class="dt-caret">${has ? "▸" : ""}</td>${cells}</tr>`;
+      const sub = has
+        ? `<tr class="dt-games" data-for="${i}" hidden>` +
+          `<td colspan="${w.columns.length + 1}">` +
+          `<table class="recent-tbl reason-games"><tbody>${gameRows}</tbody></table></td></tr>`
+        : "";
+      return main + sub;
+    }).join("");
+    return `<table class="drilltable"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+  },
+
   ranking: (w) => {
     const items = w.rows.map((r, i) =>
       `<li><span class="rk-rank">${i + 1}</span>` +
@@ -172,7 +198,7 @@ const WIDGETS = {
   line: (w) => {
     const id = "chart-" + Math.random().toString(36).slice(2);
     pendingCharts.push({ id, series: w.series, toolbar: w.toolbar !== false,
-                         agg: w.agg || "last", ma: !!w.ma });
+                         agg: w.agg || "last", ma: !!w.ma, yMax: w.y_max ?? null });
     return `<div class="chart-host" id="${id}"></div>`;
   },
   recent: () => {
@@ -214,7 +240,7 @@ function renderWidget(w) {
 
 // ---------------------------------------------------------- interactive chart
 
-function buildRatingChart(host, series, ma = false) {
+function buildRatingChart(host, series, ma = false, yMax = null) {
   const pts = (series[0] && series[0].points) || [];
   const data = pts.map((p, i) => ({ i, date: p.x, y: p.y }));
   if (data.length < 2) return;
@@ -273,6 +299,7 @@ function buildRatingChart(host, series, ma = false) {
     let lo = Math.min(...vals), hi = Math.max(...vals);
     if (lo === hi) { lo -= 10; hi += 10; }
     const pad = (hi - lo) * 0.12 || 8; curYd = [lo - pad, hi + pad];
+    if (yMax !== null && curYd[1] > yMax) curYd[1] = yMax;   // e.g. accuracy ≤ 100%
     let s = "";
     for (let t = 0; t <= 4; t++) {
       const val = curYd[0] + ((curYd[1] - curYd[0]) * t) / 4, y = yPix(val);
@@ -477,6 +504,18 @@ function buildEvalChart(host, plies, moves, me) {
     tip.style.opacity = 1;
   };
   ov.onmouseleave = () => { tip.style.opacity = 0; g.style.display = "none"; };
+  // click a point to jump the review board above to that position
+  ov.style.cursor = "pointer";
+  ov.onclick = (e) => {
+    const r = svg.getBoundingClientRect();
+    const px = (e.clientX - r.left) * (W / r.width);
+    let i = Math.round(((px - M.l) / pw) * (n - 1));
+    i = Math.max(0, Math.min(n - 1, i));
+    window.dispatchEvent(new CustomEvent("rv-goto", { detail: i }));
+  };
+  const hint = document.createElement("div"); hint.className = "chart-hint";
+  hint.textContent = "click a point to jump the board to that move";
+  host.appendChild(hint);
 }
 
 // average-eval-by-move chart: centred lines, switchable groupings (Average /
@@ -889,6 +928,20 @@ function buildReviewBoard(host, data) {
   };
   host.querySelectorAll(".rv-nav button").forEach((b) => { b.onclick = () => go(b.dataset.go); });
 
+  // jump-to-ply from elsewhere on the page (eval-chart click, or a drill-down
+  // that opened this game at a move). Only the most recent board listens.
+  if (window._rvGoto) window.removeEventListener("rv-goto", window._rvGoto);
+  window._rvGoto = (e) => {
+    if (!document.body.contains(host)) return;
+    let p = +e.detail;
+    if (Number.isNaN(p)) return;
+    p = Math.max(0, Math.min(moves.length, p));
+    variation = null; varStack.length = 0; selected = null;
+    idx = p; render();
+    host.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  };
+  window.addEventListener("rv-goto", window._rvGoto);
+
   // keyboard navigation (only the most recently built board listens)
   if (window._rvKey) window.removeEventListener("keydown", window._rvKey);
   window._rvKey = (e) => {
@@ -981,8 +1034,8 @@ async function initConversion(host) {
       pendingCharts = []; pendingEvals = []; pendingEvalCurves = [];
       body.innerHTML = d.sections.map((s) =>
         `<h3>${esc(s.title)}</h3>` + s.widgets.map(renderWidget).join("")).join("");
-      pendingCharts.forEach((c) => c.toolbar ? initChart($(c.id), c.series, c.agg, c.ma)
-        : buildRatingChart($(c.id), c.series, c.ma));
+      pendingCharts.forEach((c) => c.toolbar ? initChart($(c.id), c.series, c.agg, c.ma, c.yMax)
+        : buildRatingChart($(c.id), c.series, c.ma, c.yMax));
       pendingEvals.forEach((e) => buildEvalChart($(e.id), e.plies, e.moves, e.me));
       pendingEvalCurves.forEach((e) => buildEvalCurve($(e.id), e.groupings, e.default, e.y_label));
       pendingCharts = []; pendingEvals = []; pendingEvalCurves = [];
@@ -993,18 +1046,23 @@ async function initConversion(host) {
   load();
 }
 
-async function gotoGame(id) {
+async function gotoGame(id, ply = null) {
   state.mode = "game"; renderTabs(); renderControls();
   setStatus("Running Stockfish… first analysis can take a few seconds.", false, true);
   try {
     state.doc = await getJSON(`/api/game?selector=${encodeURIComponent(id)}&depth=${state.cfg.depth}`);
     state.category = null; $("chips").innerHTML = "";
     renderSections(); setStatus("");
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    // drilled in from a specific move? position the board there (it scrolls
+    // itself into view); otherwise just start at the top of the review.
+    if (ply != null && !Number.isNaN(ply))
+      window.dispatchEvent(new CustomEvent("rv-goto", { detail: ply }));
+    else
+      window.scrollTo({ top: 0, behavior: "smooth" });
   } catch (e) { setStatus(e.message, true); }
 }
 
-function initChart(host, series, agg = "last", ma = false) {
+function initChart(host, series, agg = "last", ma = false, yMax = null) {
   let gran = "game";
   const bar = document.createElement("div"); bar.className = "chart-toolbar";
   const wrap = document.createElement("div"); wrap.className = "chart-wrap";
@@ -1024,7 +1082,7 @@ function initChart(host, series, agg = "last", ma = false) {
   host.appendChild(bar); host.appendChild(wrap); host.appendChild(hint);
   function render() {
     wrap.innerHTML = "";
-    buildRatingChart(wrap, [{ name: series[0].name, points: aggregate(series[0].points, gran, agg) }], ma);
+    buildRatingChart(wrap, [{ name: series[0].name, points: aggregate(series[0].points, gran, agg) }], ma, yMax);
   }
   render();
 }
@@ -1076,8 +1134,8 @@ function renderSections() {
   $("result").innerHTML = `<h1>${esc(doc.title)}${link}</h1>` +
     (doc.subtitle ? `<p class="sub-title">${esc(doc.subtitle)}</p>` : "") + html;
   document.title = doc.title + " · Chess Analyzer";
-  pendingCharts.forEach((c) => c.toolbar ? initChart($(c.id), c.series, c.agg, c.ma)
-    : buildRatingChart($(c.id), c.series, c.ma));
+  pendingCharts.forEach((c) => c.toolbar ? initChart($(c.id), c.series, c.agg, c.ma, c.yMax)
+    : buildRatingChart($(c.id), c.series, c.ma, c.yMax));
   pendingRecents.forEach((id) => initRecent($(id)));
   pendingConversions.forEach((id) => initConversion($(id)));
   pendingEvals.forEach((e) => buildEvalChart($(e.id), e.plies, e.moves, e.me));
@@ -1200,9 +1258,25 @@ async function syncGames() {
   catch (e) { setStatus("Backend not reachable: " + e.message, true); return; }
   renderTabs(); renderControls();
   $("sync").onclick = syncGames;
-  // drill-down: clicking a game inside a reasons widget opens its review
+  // drill-down: a game row (reasons or drill-table) opens its review, at its
+  // move if one is attached; a drill-table parent row toggles its games.
   document.addEventListener("click", (e) => {
-    const row = e.target.closest(".reason-games [data-game-id]");
-    if (row) gotoGame(row.dataset.gameId);
+    const gameRow = e.target.closest(".reason-games [data-game-id]");
+    if (gameRow) {
+      const p = gameRow.dataset.ply;
+      gotoGame(gameRow.dataset.gameId, p === "" || p == null ? null : +p);
+      return;
+    }
+    const dtRow = e.target.closest("tr.dt-row.dt-open");
+    if (dtRow) {
+      const sub = dtRow.parentNode.querySelector(
+        `tr.dt-games[data-for="${dtRow.dataset.row}"]`);
+      if (sub) {
+        sub.hidden = !sub.hidden;
+        dtRow.classList.toggle("dt-exp", !sub.hidden);
+        const caret = dtRow.querySelector(".dt-caret");
+        if (caret) caret.textContent = sub.hidden ? "▸" : "▾";
+      }
+    }
   });
 })();

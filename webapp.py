@@ -154,18 +154,12 @@ def api_recent():
     return jsonify({"threshold": cp, "games": rows})
 
 
-@app.get("/api/conversion")
-@api
-def api_conversion():
+def _analysed_pairs(user, fmt, n, depth):
+    """(Game, GameAnalysis) for the chosen format — cached engine analyses;
+    an engine is opened only if some game isn't in the cache yet."""
     import chess.engine
-    from chessanalysis import cache, insights
+    from chessanalysis import cache
     from chessanalysis.enrich import engine as eng
-
-    user = request.args.get("user") or config.get("CHESS_USERNAME")
-    fmt = request.args.get("format") or None
-    n = request.args.get("n", default=0, type=int)
-    cp = int(config.get("DECISIVE_CP", "200"))
-    depth = int(config.get("RECENT_DEPTH", "12"))
 
     games = load_games(GAMES_DIR, user)        # chronological (oldest -> newest)
     if fmt:
@@ -182,10 +176,26 @@ def api_conversion():
     finally:
         if proc:
             proc.quit()
+    return pairs
+
+
+@app.get("/api/conversion")
+@api
+def api_conversion():
+    from chessanalysis import insights, weaknesses
+
+    user = request.args.get("user") or config.get("CHESS_USERNAME")
+    fmt = request.args.get("format") or None
+    n = request.args.get("n", default=0, type=int)
+    cp = int(config.get("DECISIVE_CP", "200"))
+    depth = int(config.get("RECENT_DEPTH", "12"))
+
+    pairs = _analysed_pairs(user, fmt, n, depth)
     sections = (insights.outcome_reasons(pairs, cp)
                 + insights.accuracy_trend(pairs)
                 + insights.eval_curve(pairs)
                 + insights.conversion_report(pairs, cp)
+                + weaknesses.report(pairs)
                 + insights.advanced_report(pairs))
     return jsonify({"sections": sections})
 

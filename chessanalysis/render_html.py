@@ -68,6 +68,15 @@ def _wdl_table(w) -> str:
     return f"<table><thead><tr>{head}</tr></thead><tbody>{''.join(rows)}</tbody></table>"
 
 
+def _drilltable(w) -> str:
+    # static export: the columnar table only — the per-row game drill-down is
+    # interactive (opens each game's board) and lives in the web app.
+    head = "".join(f"<th>{esc(c)}</th>" for c in w["columns"])
+    body = "".join("<tr>" + "".join(f"<td>{_cell(c)}</td>" for c in r["cells"])
+                   + "</tr>" for r in w["rows"])
+    return f"<table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>"
+
+
 def _line(w) -> str:
     svgs = []
     for i, s in enumerate(w["series"]):
@@ -238,7 +247,8 @@ def _timeline(w) -> str:
 
 
 _HANDLERS = {
-    "cards": _cards, "table": _table, "wdl_table": _wdl_table, "line": _line,
+    "cards": _cards, "table": _table, "wdl_table": _wdl_table,
+    "drilltable": _drilltable, "line": _line,
     "eval": _eval, "board": _board, "group": _group, "ranking": _ranking,
     "movetree": _movetree, "recent": _recent, "conversion": _conversion,
     "text": _text, "review": _review, "barstack": _barstack,
@@ -362,6 +372,16 @@ _CSS = """
                  background:var(--bg); }
   .reason-games { margin:0; }
   .reason-games td.reason-note { color:var(--mut); font-size:.85rem; }
+  .reason-games tr.rrow td:first-child { padding-left:1.4rem; }
+  /* drill-down table: rows expand to the games behind them (web app) */
+  table.drilltable th:first-child, table.drilltable td.dt-caret { width:1.2rem;
+                   padding-right:0; }
+  table.drilltable tr.dt-row.dt-open { cursor:pointer; }
+  table.drilltable tr.dt-row.dt-open:hover td { background:var(--bg); }
+  td.dt-caret { color:var(--mut); font-size:.75rem; transition:transform .12s; }
+  tr.dt-exp td.dt-caret { color:var(--accent); }
+  tr.dt-games > td { padding:0 0 .5rem 1.2rem; background:var(--bg); }
+  tr.dt-games table { margin:0; }
   .chart-tip { position:absolute; pointer-events:none; background:var(--ink); color:#fff;
                padding:.4rem .55rem; border-radius:7px; font-size:.75rem; white-space:nowrap;
                transform:translate(-50%,-130%); opacity:0; transition:opacity .07s; z-index:4; }

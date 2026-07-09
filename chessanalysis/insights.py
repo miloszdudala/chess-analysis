@@ -113,7 +113,7 @@ def conversion_report(pairs, cp: int = 200) -> list[dict]:
                  if a.accuracy.get(g.color) is not None]
     cards = W.cards([
         W.card(f"{sum(game_accs) / len(game_accs):.1f}%" if game_accs else "—",
-               "Your accuracy", sub="criticality-weighted (robust)"),
+               "Your accuracy", sub="Lichess method (win%-based)"),
         W.card(f"{round(100 * moves_t3 / moves_n)}%" if moves_n else "—",
                "Top-3 match", sub="your moves in the engine's top 3"),
         W.card(f"{round(100 * won / reached_win)}%" if reached_win else "—",
@@ -263,6 +263,7 @@ def accuracy_trend(pairs) -> list[dict]:
     line = W.line([{"name": "Accuracy", "points": pts}], y_label="Accuracy")
     line["toolbar"] = True
     line["agg"] = "mean"
+    line["y_max"] = 100      # accuracy is a percentage — never scale past 100
     return [{"title": "Accuracy over time", "widgets": [line]}]
 
 

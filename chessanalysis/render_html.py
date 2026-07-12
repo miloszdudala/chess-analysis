@@ -183,6 +183,16 @@ def _text(w) -> str:
     return f'<p class="text">{w["body"]}</p>'
 
 
+def _verdict(w) -> str:
+    # static export: the reason dropdown is interactive (web app only); show the
+    # current verdict as a card + sentence.
+    manual = ' <span class="vd-manual">manually set</span>' if w.get("manual") else ""
+    sub = f'<div class="vd-sub">{esc(w["sub"])}</div>' if w.get("sub") else ""
+    return (f'<div class="verdict"><div class="vd-label">{esc(w["label"])}{manual}</div>'
+            f'<div class="vd-headline">{esc(w["headline"])}</div>{sub}'
+            f'<p class="text vd-detail">{esc(w["detail"])}</p></div>')
+
+
 def _review(w) -> str:
     # Fully interactive (board navigation + engine arrows); web app only.
     return ('<p class="text">The move-by-move board explorer is interactive — '
@@ -251,7 +261,7 @@ _HANDLERS = {
     "drilltable": _drilltable, "line": _line,
     "eval": _eval, "board": _board, "group": _group, "ranking": _ranking,
     "movetree": _movetree, "recent": _recent, "conversion": _conversion,
-    "text": _text, "review": _review, "barstack": _barstack,
+    "text": _text, "verdict": _verdict, "review": _review, "barstack": _barstack,
     "donut": _donut, "timeline": _timeline,
 }
 
@@ -372,6 +382,23 @@ _CSS = """
                  background:var(--bg); }
   .reason-games { margin:0; }
   .reason-games td.reason-note { color:var(--mut); font-size:.85rem; }
+  /* game verdict + manual reason override (web app) */
+  .verdict { border:1px solid var(--line); border-radius:10px; background:var(--panel);
+             padding:.8rem 1rem .3rem; }
+  .vd-top { display:flex; align-items:flex-start; gap:1rem; flex-wrap:wrap; }
+  .vd-main { flex:1; min-width:12rem; }
+  .vd-label { font-size:.68rem; text-transform:uppercase; letter-spacing:.08em;
+              color:var(--mut); }
+  .vd-headline { font-size:1.15rem; font-weight:600; letter-spacing:-.01em; margin-top:.1rem; }
+  .vd-sub { color:var(--mut); font-size:.82rem; margin-top:.15rem; }
+  .vd-pick { display:flex; flex-direction:column; gap:.25rem; font-size:.68rem;
+             text-transform:uppercase; letter-spacing:.08em; color:var(--mut); }
+  .vd-pick select { text-transform:none; letter-spacing:normal; font:inherit;
+                    background:var(--bg); color:var(--ink); border:1px solid var(--line);
+                    border-radius:8px; padding:.35rem .5rem; }
+  .vd-manual { display:inline-block; margin-left:.4rem; color:var(--accent);
+               font-weight:600; letter-spacing:normal; text-transform:none; }
+  .vd-detail { margin:.5rem 0 .4rem; }
   .reason-games tr.rrow td:first-child { padding-left:1.4rem; }
   /* drill-down table: rows expand to the games behind them (web app) */
   table.drilltable th:first-child, table.drilltable td.dt-caret { width:1.2rem;

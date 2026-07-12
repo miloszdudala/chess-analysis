@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import threading
+import time
 from functools import wraps
 
 from flask import Flask, Response, jsonify, request, send_from_directory
@@ -34,6 +35,77 @@ def _analyse_engine():
         from chessanalysis.enrich import engine as eng
         _ANALYSE_ENGINE = chess.engine.SimpleEngine.popen_uci(eng.find_engine())
     return _ANALYSE_ENGINE
+
+
+# --- background pre-analysis (pre-warm the review cache at review depth) ------
+# Analysing every game at ENGINE_DEPTH ahead of time makes Game Review open
+# instantly (it reads the same disk cache). A single worker thread runs it in
+# the background; progress + a live ETA are polled from /api/prewarm.
+_PREWARM_LOCK = threading.Lock()
+_PREWARM_THREAD = None
+_PREWARM = {"running": False, "finished": False, "error": None, "depth": 0,
+            "total": 0, "already": 0, "to_compute": 0, "done": 0,
+            "computed": 0, "compute_time": 0.0, "eta": None, "start": 0.0}
+# rough per-game time for a depth-15 full-game pass on this machine; only used
+# for the very first estimate, then replaced by the measured average.
+EST_SECONDS_PER_GAME = 33
+
+
+def _prewarm_key(game, depth):
+    return f"{game.game_id}_d{depth}"
+
+
+def _prewarm_snapshot():
+    s = {k: _PREWARM[k] for k in _PREWARM if k != "start"}
+    s["elapsed"] = round(time.time() - _PREWARM["start"]) if _PREWARM["start"] else 0
+    return s
+
+
+def _prewarm_worker(user, depth):
+    import chess.engine
+    from chessanalysis import cache
+    from chessanalysis.enrich import engine as eng
+
+    try:
+        games = load_games(GAMES_DIR, user)
+        todo, already = [], 0
+        for g in games:
+            c = cache.load("engine", _prewarm_key(g, depth))
+            if c and c.get("evals") and c.get("top_moves"):
+                already += 1
+            else:
+                todo.append(g)
+        with _PREWARM_LOCK:
+            _PREWARM.update(total=len(games), already=already, done=already,
+                            to_compute=len(todo),
+                            eta=round(len(todo) * EST_SECONDS_PER_GAME))
+
+        proc = None
+        try:
+            for g in todo:
+                if proc is None:
+                    proc = chess.engine.SimpleEngine.popen_uci(eng.find_engine())
+                t = time.time()
+                eng.analyse_game(g, depth=depth, engine=proc)
+                dt = time.time() - t
+                with _PREWARM_LOCK:
+                    _PREWARM["done"] += 1
+                    _PREWARM["computed"] += 1
+                    _PREWARM["compute_time"] += dt
+                    per = _PREWARM["compute_time"] / _PREWARM["computed"]
+                    left = _PREWARM["to_compute"] - _PREWARM["computed"]
+                    _PREWARM["eta"] = round(per * left)
+        finally:
+            if proc:
+                proc.quit()
+    except Exception as e:                       # noqa: BLE001
+        with _PREWARM_LOCK:
+            _PREWARM["error"] = f"{type(e).__name__}: {e}"
+    finally:
+        with _PREWARM_LOCK:
+            _PREWARM["running"] = False
+            _PREWARM["finished"] = True
+            _PREWARM["eta"] = 0
 
 
 def api(fn):
@@ -88,6 +160,51 @@ def api_scrape():
     res = scraper.scrape(user, GAMES_DIR)   # hits the Chess.com API (user-triggered)
     res["user"] = user
     return jsonify(res)
+
+
+@app.get("/api/prewarm")
+@api
+def api_prewarm_status():
+    """Progress of the background review-cache warm-up. When idle, reports how
+    many games still need analysis and a rough time estimate to do them."""
+    from chessanalysis import cache
+
+    with _PREWARM_LOCK:
+        if _PREWARM["running"] or _PREWARM["finished"]:
+            return jsonify(_prewarm_snapshot())
+
+    user = request.args.get("user") or config.get("CHESS_USERNAME")
+    depth = int(config.get("ENGINE_DEPTH", "15"))
+    games = load_games(GAMES_DIR, user)
+    already = sum(1 for g in games if cache.exists("engine", _prewarm_key(g, depth)))
+    todo = len(games) - already
+    return jsonify({
+        "running": False, "finished": False, "error": None, "depth": depth,
+        "total": len(games), "already": already, "to_compute": todo,
+        "done": already, "computed": 0, "compute_time": 0.0, "elapsed": 0,
+        "eta": round(todo * EST_SECONDS_PER_GAME),
+    })
+
+
+@app.post("/api/prewarm")
+@api
+def api_prewarm_start():
+    """Kick off (or report) the background analysis of every game at review
+    depth, so Game Review opens instantly afterwards."""
+    global _PREWARM_THREAD
+    user = request.args.get("user") or config.get("CHESS_USERNAME")
+    depth = int(config.get("ENGINE_DEPTH", "15"))
+    with _PREWARM_LOCK:
+        if _PREWARM["running"]:
+            return jsonify(_prewarm_snapshot())
+        _PREWARM.update(running=True, finished=False, error=None, depth=depth,
+                        total=0, already=0, to_compute=0, done=0, computed=0,
+                        compute_time=0.0, eta=None, start=time.time())
+    _PREWARM_THREAD = threading.Thread(
+        target=_prewarm_worker, args=(user, depth), daemon=True)
+    _PREWARM_THREAD.start()
+    with _PREWARM_LOCK:
+        return jsonify(_prewarm_snapshot())
 
 
 @app.get("/api/games")
@@ -208,6 +325,23 @@ def api_game():
     depth = request.args.get("depth", type=int)
     doc = modes.get("game")(user, games_dir=GAMES_DIR, selector=selector, depth=depth)
     return jsonify(doc.to_dict())
+
+
+@app.post("/api/verdict")
+@api
+def api_set_verdict():
+    """Manually set (or clear) the win/loss reason flag for one game."""
+    from chessanalysis import diagnosis as dx, overrides
+
+    gid = request.args.get("game")
+    reason = request.args.get("reason") or None
+    if not gid:
+        return jsonify({"error": "game id required"}), 400
+    allowed = set(dx.WIN_REASONS) | set(dx.LOSS_REASONS) | set(dx.DRAW_REASONS)
+    if reason is not None and reason not in allowed:
+        return jsonify({"error": f"unknown reason '{reason}'"}), 400
+    overrides.set_reason(gid, reason)
+    return jsonify({"ok": True, "game": gid, "reason": reason})
 
 
 @app.get("/api/analyse")

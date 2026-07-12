@@ -17,11 +17,21 @@
     padding: .2rem 0; border-bottom: 2px solid transparent; }
   .tab:hover { color: var(--ink); }
   .tab.active { color: var(--ink); border-bottom-color: var(--accent); }
-  .sync { margin-left: auto; background: var(--panel); border: 1px solid var(--line);
+  .sync { background: var(--panel); border: 1px solid var(--line);
     color: var(--ink); border-radius: 8px; padding: .4rem .85rem; cursor: pointer;
     font: inherit; font-size: .85rem; }
+  .sync:first-of-type { margin-left: auto; }
   .sync:hover { border-color: var(--accent); color: var(--accent); }
   .sync:disabled { opacity: .55; cursor: default; }
+  .prewarm { max-width: 960px; margin: .3rem auto 0; font-size: .82rem; color: var(--mut);
+    display: none; align-items: center; gap: .6rem; }
+  .prewarm.on { display: flex; }
+  .prewarm .pw-track { flex: 1; height: 6px; background: var(--line); border-radius: 4px;
+    overflow: hidden; max-width: 320px; }
+  .prewarm .pw-fill { height: 100%; width: 0; background: var(--accent);
+    transition: width .4s ease; }
+  .prewarm.done .pw-fill { background: var(--win); }
+  .prewarm .pw-txt { white-space: nowrap; }
   .controls { max-width: 960px; margin: 1.3rem auto .4rem; display: flex; gap: .7rem;
     align-items: end; flex-wrap: wrap; }
   .field { display: flex; flex-direction: column; gap: .3rem; }
@@ -55,6 +65,7 @@
   <div class="appbar">
     <span class="brand">♟ Chess Analyzer</span>
     <div class="tabs" id="tabs"></div>
+    <button class="sync" id="prewarm" title="Analyze every game at review depth in the background so Game Review opens instantly">⚡ Prepare reviews</button>
     <button class="sync" id="sync" title="Download new games from Chess.com">⟳ Sync games</button>
   </div>
 </header>
@@ -62,6 +73,10 @@
 <div class="controls" id="controls"></div>
 <div class="chips" id="chips"></div>
 <div class="status" id="status"></div>
+<div class="prewarm" id="prewarm-bar">
+  <div class="pw-track"><div class="pw-fill" id="pw-fill"></div></div>
+  <span class="pw-txt" id="pw-txt"></span>
+</div>
 
 <div class="wrap"><div id="result"></div></div>
 

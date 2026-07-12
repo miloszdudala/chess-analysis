@@ -13,6 +13,12 @@ async function getJSON(url) {
   if (!r.ok || d.error) throw new Error(d.error || `HTTP ${r.status}`);
   return d;
 }
+async function postJSON(url) {
+  const r = await fetch(url, { method: "POST" });
+  const d = await r.json();
+  if (!r.ok || d.error) throw new Error(d.error || `HTTP ${r.status}`);
+  return d;
+}
 function setStatus(msg, isErr = false, busy = false) {
   const s = $("status");
   s.className = "status" + (isErr ? " err" : "");
@@ -79,6 +85,20 @@ const WIDGETS = {
       return main + sub;
     }).join("");
     return `<table class="drilltable"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+  },
+
+  verdict: (w) => {
+    const opts = w.options.map((o) =>
+      `<option value="${esc(o.key)}"${o.key === w.primary ? " selected" : ""}>${esc(o.label)}</option>`).join("");
+    const manual = w.manual ? `<span class="vd-manual">manually set</span>` : "";
+    const sub = w.sub ? `<div class="vd-sub">${esc(w.sub)}</div>` : "";
+    return `<div class="verdict" data-game-id="${esc(w.game_id)}">` +
+      `<div class="vd-top">` +
+        `<div class="vd-main"><div class="vd-label">${esc(w.label)}</div>` +
+        `<div class="vd-headline">${esc(w.headline)}</div>${sub}</div>` +
+        `<label class="vd-pick">reason${manual}` +
+        `<select class="vd-select">${opts}</select></label>` +
+      `</div><p class="text vd-detail">${esc(w.detail)}</p></div>`;
   },
 
   ranking: (w) => {
@@ -1253,11 +1273,84 @@ async function syncGames() {
   }
 }
 
+// ------------------------------------------------ background review pre-warm
+
+function fmtDur(sec) {
+  if (sec == null) return "";
+  if (sec < 90) return `~${Math.max(1, Math.round(sec))} sec`;
+  if (sec < 5400) return `~${Math.round(sec / 60)} min`;
+  return `~${(sec / 3600).toFixed(1)} h`;
+}
+
+function renderPrewarm(s) {
+  const bar = $("prewarm-bar"), fill = $("pw-fill"), txt = $("pw-txt"), btn = $("prewarm");
+  const pct = s.total ? Math.round((100 * s.done) / s.total) : 0;
+  bar.classList.remove("done");
+  if (s.running) {
+    btn.disabled = true; btn.textContent = "⏳ Analyzing…";
+    bar.classList.add("on"); fill.style.width = pct + "%";
+    const left = s.eta == null ? "estimating…" : `${fmtDur(s.eta)} left`;
+    txt.textContent = `Analyzing at depth ${s.depth} · ${s.done}/${s.total} games · ${left}`;
+  } else if (s.finished) {
+    btn.disabled = false; btn.textContent = "✓ Reviews ready";
+    bar.classList.add("on");
+    fill.style.width = "100%";
+    if (s.error) {
+      txt.textContent = `Analysis stopped: ${s.error}`;
+    } else {
+      bar.classList.add("done");
+      txt.textContent = `All ${s.total} games analyzed at depth ${s.depth} — Game Review is now instant.`;
+    }
+  } else if (s.to_compute > 0) {
+    btn.disabled = false; btn.textContent = "⚡ Prepare reviews";
+    btn.title = `Analyze ${s.to_compute} games at depth ${s.depth} (${fmtDur(s.eta)}) so Game Review opens instantly`;
+    bar.classList.add("on"); fill.style.width = pct + "%";
+    txt.textContent = `${s.to_compute} of ${s.total} games not yet analyzed at depth ${s.depth} · ${fmtDur(s.eta)} — click “Prepare reviews”.`;
+  } else {
+    btn.disabled = false; btn.textContent = "✓ Reviews ready";
+    bar.classList.remove("on");
+  }
+}
+
+let _pwTimer = null;
+async function prewarmFetch(method) {
+  const r = await fetch("/api/prewarm?user=" + encodeURIComponent(state.cfg.user || ""),
+    { method });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();                     // an `error` field here is job status, not fatal
+}
+
+async function pollPrewarm() {
+  try {
+    const s = await prewarmFetch("GET");
+    renderPrewarm(s);
+    clearTimeout(_pwTimer);
+    if (s.running) _pwTimer = setTimeout(pollPrewarm, 1500);
+  } catch (e) { /* transient — the next poll will recover */ }
+}
+
+async function startPrewarm() {
+  const btn = $("prewarm");
+  btn.disabled = true; btn.textContent = "⏳ Starting…";
+  try {
+    renderPrewarm(await prewarmFetch("POST"));
+    clearTimeout(_pwTimer);
+    pollPrewarm();
+  } catch (e) {
+    setStatus("Could not start analysis: " + e.message, true);
+    btn.disabled = false; btn.textContent = "⚡ Prepare reviews";
+  }
+}
+
+// ----------------------------------------------------------------------- init
+
 (async function init() {
   try { state.cfg = await getJSON("/api/config"); }
   catch (e) { setStatus("Backend not reachable: " + e.message, true); return; }
   renderTabs(); renderControls();
   $("sync").onclick = syncGames;
+  $("prewarm").onclick = startPrewarm;
+  pollPrewarm();                       // show the estimate, or resume a running job
   // drill-down: a game row (reasons or drill-table) opens its review, at its
   // move if one is attached; a drill-table parent row toggles its games.
   document.addEventListener("click", (e) => {
@@ -1277,6 +1370,28 @@ async function syncGames() {
         const caret = dtRow.querySelector(".dt-caret");
         if (caret) caret.textContent = sub.hidden ? "▸" : "▾";
       }
+    }
+  });
+  // manual override of the win/loss reason flag (verdict dropdown)
+  document.addEventListener("change", async (e) => {
+    const sel = e.target.closest(".verdict .vd-select");
+    if (!sel) return;
+    const box = sel.closest(".verdict");
+    const gid = box.dataset.gameId, reason = sel.value;
+    sel.disabled = true;
+    try {
+      await postJSON(`/api/verdict?game=${encodeURIComponent(gid)}&reason=${encodeURIComponent(reason)}`);
+      box.querySelector(".vd-headline").textContent =
+        sel.options[sel.selectedIndex].textContent;
+      if (!box.querySelector(".vd-manual")) {
+        const m = document.createElement("span");
+        m.className = "vd-manual"; m.textContent = "manually set";
+        box.querySelector(".vd-pick").insertBefore(m, sel);
+      }
+    } catch (err) {
+      setStatus("Could not save reason: " + err.message, true);
+    } finally {
+      sel.disabled = false;
     }
   });
 })();

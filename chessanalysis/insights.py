@@ -13,7 +13,13 @@ from collections import Counter
 import chess
 
 from . import diagnosis as dx
+from . import overrides
 from . import widgets as W
+
+
+def _table_for(outcome):
+    return (dx.WIN_REASONS if outcome == "win"
+            else dx.LOSS_REASONS if outcome == "loss" else dx.DRAW_REASONS)
 
 PHASE_ORDER = ["Opening", "Middlegame", "Endgame"]
 
@@ -390,14 +396,20 @@ def outcome_reasons(pairs, cp: int = 200) -> list[dict]:
         if dg is None:
             continue
         n += 1
+        # honour a manual correction of the reason flag, if the player set one
+        primary, detail = dg.primary, dg.detail
+        ov = overrides.get(getattr(g, "game_id", ""))
+        if ov and ov.get("primary") in _table_for(dg.outcome):
+            primary = ov["primary"]
+            detail = "Reason set manually. " + dg.detail
         totals[dg.outcome] += 1
-        buckets[dg.outcome].setdefault(dg.primary, []).append({
+        buckets[dg.outcome].setdefault(primary, []).append({
             "id": getattr(g, "game_id", ""),
             "date": getattr(g, "date", ""),
             "opponent": getattr(g, "opponent", ""),
             "opp_elo": getattr(g, "opp_elo", None),
             "outcome": dg.outcome,
-            "detail": dg.detail,
+            "detail": detail,
             "acc": a.accuracy.get(getattr(g, "color", "")),
         })
         for f in dg.factors:

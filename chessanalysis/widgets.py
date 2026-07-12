@@ -140,6 +140,20 @@ def review(positions: list[dict], moves: list[dict], orientation: str,
             "orientation": orientation, "white": white, "black": black}
 
 
+def verdict(game_id, label, headline, sub, detail, outcome, primary,
+            options, manual=False) -> dict:
+    """The game's win/loss verdict with a manual reason override (web app).
+
+    options: [{"key":.., "label":..}] — the reasons selectable for this outcome.
+    `primary` is the current reason key; `manual` flags a user override. The UI
+    renders a dropdown that POSTs /api/verdict to change the flag.
+    """
+    return {"type": "verdict", "game_id": game_id, "label": label,
+            "headline": headline, "sub": sub, "detail": detail,
+            "outcome": outcome, "primary": primary, "options": options,
+            "manual": manual}
+
+
 def ranking(title: str, rows: list[dict]) -> dict:
     """A ranked list. rows: [{"label":.., "value":.., "sub":?}] (pre-sorted)."""
     return {"type": "ranking", "title": title, "rows": rows}

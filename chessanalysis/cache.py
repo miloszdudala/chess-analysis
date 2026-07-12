@@ -12,6 +12,10 @@ def _path(namespace: str, key: str) -> str:
     return os.path.join(CACHE_DIR, namespace, f"{safe}.json")
 
 
+def exists(namespace: str, key: str) -> bool:
+    return os.path.exists(_path(namespace, key))
+
+
 def load(namespace: str, key: str) -> dict | None:
     path = _path(namespace, key)
     if os.path.exists(path):

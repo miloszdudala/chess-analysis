@@ -8,6 +8,7 @@ report.json
 report*.json
 out/
 data/cache/
+data/overrides.json
 
 # Python
 __pycache__/

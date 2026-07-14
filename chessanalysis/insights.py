@@ -10,8 +10,6 @@ from __future__ import annotations
 
 from collections import Counter
 
-import chess
-
 from . import diagnosis as dx
 from . import overrides
 from . import widgets as W
@@ -151,10 +149,12 @@ def conversion_report(pairs, cp: int = 200) -> list[dict]:
         [[ph, won_phase.get(ph, 0), lost_phase.get(ph, 0)] for ph in PHASE_ORDER],
     )
 
+    # (no raw "accuracy by phase" table here: phase accuracy is confounded by
+    # phase difficulty — weaknesses.phase_parity shows the fair, opponent-paired
+    # version instead. phase_agg still feeds the Top-3 headline card above.)
     return [
         {"title": "Outcomes", "widgets": [cards]},
         {"title": "Where games are decided", "widgets": [decided_cards, decided_table]},
-        {"title": "Accuracy by phase", "widgets": [table(phase_agg, PHASE_ORDER, "Phase")]},
         {"title": "Accuracy by position (your move)",
          "widgets": [table(state_agg, [s[0] for s in STATES], "Position")]},
     ]
@@ -275,7 +275,6 @@ def accuracy_trend(pairs) -> list[dict]:
 
 # --- advanced, engine-derived diagnostics -----------------------------------
 OPP_DROP = 150        # cp the opponent must hand you in one move to count as a chance
-SHARP_GAP = 150       # cp gap between the engine's #1 and #2 = a "sharp" position
 ERROR_LABELS = {"mistake", "blunder"}
 
 
@@ -284,24 +283,23 @@ def _is_error(label) -> bool:
 
 
 def advanced_report(pairs) -> list[dict]:
-    """Five engine-derived diagnostics aggregated over all analysed games.
+    """Tactical awareness & tilt, aggregated over all analysed games.
 
-    Uses each GameAnalysis's per-move evals, multi-PV candidates (top_moves),
-    SAN/best-move and the board (fen_before) — so no extra engine work beyond
-    the analysis the conversion pass already ran.
+    Two engine-derived diagnostics with a clear chess meaning: do you punish
+    opponent blunders with the refutation, and does one error of yours breed
+    the next? (Weaker signals — sharpness ACPL, premature simplification —
+    were dropped as hard to act on.)
     """
     opp_chances = opp_taken = 0                       # opponent-error capitalization
     err_followed = err_then_err = 0                   # cascading errors
     base_moves = base_err = 0
-    sharp_cpl, calm_cpl = [], []                      # sharpness vulnerability
-    tension_pos = tension_premature = 0               # tension resolution
 
     for g, a in pairs:
         evals = a.evals
         if not evals:
             continue
         sgn = 1 if g.color == "white" else -1
-        moves, tops = a.moves, a.top_moves
+        moves = a.moves
 
         # Opponent error capitalization: opponent hands you ≥OPP_DROP in one move,
         # do you reply with the engine's #1 (the refutation)?
@@ -327,33 +325,10 @@ def advanced_report(pairs) -> list[dict]:
                 err_followed += 1
                 err_then_err += _is_error(mine[j + 1].label)
 
-        # Sharpness vulnerability + tension resolution: per own move, look at the
-        # multi-PV candidates and the board at that position.
-        for m in mine:
-            idx = m.ply - 1
-            cand = tops[idx] if 0 <= idx < len(tops) else []
-            if len(cand) >= 2:
-                gap = abs(cand[0]["cp"] - cand[1]["cp"])
-                (sharp_cpl if gap >= SHARP_GAP else calm_cpl).append(m.cp_loss)
-            if cand and m.fen_before and m.move_uci:
-                try:
-                    b = chess.Board(m.fen_before)
-                    played = chess.Move.from_uci(m.move_uci)
-                    best = chess.Move.from_uci(cand[0]["uci"])
-                except (ValueError, IndexError):
-                    continue
-                if sum(b.is_capture(mv) for mv in b.legal_moves) >= 2:
-                    tension_pos += 1
-                    # you released the tension (captured) but the engine kept it
-                    if b.is_capture(played) and not b.is_capture(best):
-                        tension_premature += 1
-
     if not base_moves:
         return []
 
     pct = lambda n, d: f"{round(100 * n / d)}%" if d else "—"
-    mean = lambda xs: round(sum(xs) / len(xs)) if xs else None
-    sharp_acpl, calm_acpl = mean(sharp_cpl), mean(calm_cpl)
     casc = pct(err_then_err, err_followed)
     base_rate = pct(base_err, base_moves)
 
@@ -362,21 +337,134 @@ def advanced_report(pairs) -> list[dict]:
                sub=f"{opp_taken}/{opp_chances} refuted with the top move"),
         W.card(casc, "Cascading-error probability",
                sub=f"P(error | prior error) · base {base_rate}"),
-        W.card(sharp_acpl if sharp_acpl is not None else "—", "Sharpness ACPL",
-               sub=f"in sharp spots vs {calm_acpl if calm_acpl is not None else '—'} calm"),
-        W.card(pct(tension_premature, tension_pos), "Premature simplification",
-               sub=f"{tension_premature}/{tension_pos} tense positions released early"),
     ])
     notes = W.text(
         "Opponent-error capitalization — when the opponent blunders ≥1.5 pawns, how "
         "often you find the engine's refutation (offensive sharpness). "
         "Cascading-error probability — chance your next move is also an error right "
-        "after a mistake; well above your base error rate signals tilt. "
-        "Sharpness ACPL — average centipawn loss only in positions where the best "
-        "move is far ahead of the second-best (calculation under pressure). "
-        "Premature simplification — share of multi-capture positions where you "
-        "released the tension but the engine preferred to keep it.")
-    return [{"title": "Advanced metrics", "widgets": [cards, notes]}]
+        "after a mistake; well above your base error rate signals tilt.")
+    return [{"title": "Tactical awareness & tilt", "widgets": [cards, notes]}]
+
+
+# --- progress check: recent games vs your own baseline ----------------------
+# metric key -> (label, higher_is_better, "no change" epsilon, sample floor key)
+_PROGRESS_METRICS = [
+    ("acc", "Accuracy", True, 0.5),
+    ("bl100", "Blunders / 100 moves", False, 0.3),
+    ("conv", "Conversion of winning positions", True, 3.0),
+    ("punish", "Opponent blunders punished", True, 3.0),
+    ("open_cpl", "Opening cp-loss per move (to move 12)", False, 3.0),
+    ("tt", "Games reaching time trouble", False, 3.0),
+]
+
+
+def _progress_block(pairs, cp):
+    """The tracked metrics over one block of (Game, GameAnalysis) pairs.
+
+    Returns {key: (value, n)} with n = the metric's own sample size, so each
+    row can be gated independently.
+    """
+    from .clocks import TIME_TROUBLE_FRAC, clock_profile
+
+    accs, open_cpl = [], []
+    own = bl = reached = won = chances = taken = prof = tt = 0
+    for g, a in pairs:
+        if not a.evals or not a.moves:
+            continue
+        sgn = 1 if g.color == "white" else -1
+        user_evals = [sgn * e for e in a.evals]
+        v = a.accuracy.get(g.color)
+        if v is not None:
+            accs.append(v)
+        if max(user_evals) >= cp:
+            reached += 1
+            won += (g.outcome == "win")
+        for i, m in enumerate(a.moves):
+            if m.color == g.color:
+                own += 1
+                bl += (m.label == "blunder")
+                if m.ply <= 24:
+                    open_cpl.append(m.cp_loss)
+            elif 1 <= m.ply < len(a.evals) and \
+                    sgn * a.evals[m.ply] - sgn * a.evals[m.ply - 1] >= OPP_DROP:
+                chances += 1
+                nxt = a.moves[i + 1] if i + 1 < len(a.moves) else None
+                if nxt and nxt.color == g.color and nxt.best_san and nxt.san == nxt.best_san:
+                    taken += 1
+        try:
+            pp = clock_profile(g, g.color)
+        except Exception:                   # noqa: BLE001 — clockless stubs/games
+            pp = None
+        if pp:
+            prof += 1
+            tt += (pp.min_frac < TIME_TROUBLE_FRAC)
+
+    out = {}
+    if accs:
+        out["acc"] = (sum(accs) / len(accs), len(accs))
+    if own >= 200:
+        out["bl100"] = (100 * bl / own, own)
+    if reached >= 5:
+        out["conv"] = (100 * won / reached, reached)
+    if chances >= 5:
+        out["punish"] = (100 * taken / chances, chances)
+    if len(open_cpl) >= 100:
+        out["open_cpl"] = (sum(open_cpl) / len(open_cpl), len(open_cpl))
+    if prof >= 10:
+        out["tt"] = (100 * tt / prof, prof)
+    return out
+
+
+def progress_report(pairs, cp: int = 200) -> list[dict]:
+    """Are you actually improving? Recent games vs your own earlier baseline.
+
+    Splits the analysed games chronologically (recent = last 25 once there are
+    50+, else the last third) and compares the key leak metrics. The baseline is
+    the player's own history — a fair comparison — and every metric is gated on
+    its own sample size, so thin data drops the row rather than faking a trend.
+    """
+    usable = [(g, a) for g, a in pairs if a.evals and a.moves]
+    if len(usable) < 20:
+        return []
+    cut = len(usable) - (25 if len(usable) >= 50 else len(usable) // 3)
+    base = _progress_block(usable[:cut], cp)
+    recent = _progress_block(usable[cut:], cp)
+
+    unit = {"acc": "%", "conv": "%", "punish": "%", "tt": "%",
+            "bl100": "", "open_cpl": "cp"}
+    rows, better = [], 0
+    tracked = 0
+    for key, label, higher, eps in _PROGRESS_METRICS:
+        if key not in base or key not in recent:
+            continue
+        (b, bn), (r, rn) = base[key], recent[key]
+        delta = r - b
+        u = unit[key]
+        if abs(delta) < eps:
+            change = "≈ no real change"
+        else:
+            good = (delta > 0) == higher
+            arrow = "▲" if delta > 0 else "▼"
+            change = f"{arrow} {abs(delta):.1f}{u} {'better' if good else 'worse'}"
+            better += good
+        tracked += 1
+        rows.append([label, f"{b:.1f}{u}", f"{r:.1f}{u}", change])
+    if not rows:
+        return []
+
+    head = W.cards([
+        W.card(f"{better}/{tracked}", "Areas improving",
+               sub=f"last {len(usable) - cut} games vs the {cut} before"),
+    ])
+    note = W.text(
+        f"Your last {len(usable) - cut} analysed games against your own earlier "
+        f"baseline ({cut} games) — the honest way to see whether the things "
+        f"you're working on are moving. Small recent samples are noisy: treat "
+        f"a change as real only when it persists as more games come in.")
+    return [{"title": "Progress check — recent vs baseline", "widgets": [
+        head, note,
+        W.table(["Metric", "Baseline", "Recent", "Change"], rows),
+    ]}]
 
 
 def outcome_reasons(pairs, cp: int = 200) -> list[dict]:

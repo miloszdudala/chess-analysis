@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from chessanalysis.contexts import PlayerContext
 from chessanalysis.document import Document
-from chessanalysis.metrics.player.breakdowns import by_game_length, momentum
+from chessanalysis.metrics.player.breakdowns import by_game_length
 from chessanalysis.metrics.player.openings import _opening_family, opening_repertoire
 from chessanalysis.model import Game, Move
 from chessanalysis.registry import metrics_for
@@ -38,38 +38,10 @@ def test_every_player_metric_is_categorised():
         assert m.category, f"player metric {m.id!r} has no category"
 
 
-# --- momentum / tilt --------------------------------------------------------
-
 def _wdl_by_label(barstack):
     """{label: {win/draw/loss: n}} from a W/D/L barstack widget."""
     return {r["label"]: {s["name"]: s["value"] for s in r["segments"]}
             for r in barstack["rows"]}
-
-
-def test_momentum_same_day_buckets():
-    # all same (empty) date: g1 is first-of-day, then same-day transitions
-    # W, L, L, W : after-win->loss; after-loss->{loss,win}; streak(2+)->final win
-    games = [make_game(o) for o in ("win", "loss", "loss", "win")]
-    strip, chart = momentum(_ctx(games))
-    assert strip["type"] == "timeline" and len(strip["items"]) == 4
-    rows = _wdl_by_label(chart)
-    assert rows["First game of the day"]["win"] == 1
-    assert rows["After a win (same day)"]["loss"] == 1
-    assert rows["After a loss (same day)"]["loss"] == 1
-    assert rows["After a loss (same day)"]["win"] == 1
-    assert rows["On a 2+ loss streak (same day)"]["win"] == 1
-
-
-def test_momentum_resets_across_days():
-    # day 1: win ; day 2: loss then win. The day1->day2 pair must NOT count as
-    # 'after a win'; only the same-day day2 loss->win transition does.
-    g1 = make_game("win"); g1.headers["Date"] = "2026.01.01"
-    g2 = make_game("loss"); g2.headers["Date"] = "2026.01.02"
-    g3 = make_game("win"); g3.headers["Date"] = "2026.01.02"
-    rows = _wdl_by_label(momentum(_ctx([g1, g2, g3]))[1])
-    assert rows["First game of the day"]["win"] == 1 and rows["First game of the day"]["loss"] == 1
-    assert "After a win (same day)" not in rows          # cross-day pair excluded
-    assert rows["After a loss (same day)"]["win"] == 1   # the same-day pair counts
 
 
 # --- game length ------------------------------------------------------------

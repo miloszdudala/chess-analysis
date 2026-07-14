@@ -122,17 +122,6 @@ def test_cascading_error_probability():
     assert cards["Cascading-error probability"] == "50%"
 
 
-def test_sharpness_acpl_splits_sharp_vs_calm():
-    # ply1 in a sharp position (top1-top2 gap 200) losing 80cp; ply3 calm (gap 10) losing 10cp
-    moves = [mev(1, "white", cp_loss=80), mev(2, "black"), mev(3, "white", cp_loss=10)]
-    top = [[{"uci": "a2a3", "cp": 300}, {"uci": "b2b3", "cp": 100}],   # idx0: sharp
-           [],
-           [{"uci": "c2c3", "cp": 50}, {"uci": "d2d3", "cp": 40}]]      # idx2: calm
-    a = _analysis(moves, evals=[0] * 4, top_moves=top)
-    cards = _cards(insights.advanced_report([(FakeGame(color="white"), a)]))
-    assert cards["Sharpness ACPL"] == 80          # only the sharp-position loss
-
-
 def test_opponent_error_capitalization():
     # black (opponent) hands white +2.0 on ply2; white refutes with the best move on ply3
     moves = [mev(1, "white"),
@@ -144,16 +133,38 @@ def test_opponent_error_capitalization():
     assert cards["Opponent-error capitalization"] == "100%"
 
 
-def test_premature_simplification():
-    # a position with two pawn captures (exd5 / dxe5); white grabs one but the
-    # engine's best is a non-capture (Nf3) — releasing the tension early.
-    import chess
-    pos = chess.Board("rnbqkbnr/ppp2ppp/8/3pp3/3PP3/8/PPP2PPP/RNBQKBNR w KQkq - 0 1")
-    caps = [m for m in pos.legal_moves if pos.is_capture(m)]
-    assert len(caps) >= 2
-    cap = caps[0]
-    moves = [mev(1, "white", fen=pos.fen(), uci=cap.uci())]
-    top = [[{"uci": "g1f3", "cp": 30}, {"uci": cap.uci(), "cp": 20}]]   # best is non-capture
-    a = _analysis(moves, evals=[0, 0], top_moves=top)
-    cards = _cards(insights.advanced_report([(FakeGame(color="white"), a)]))
-    assert cards["Premature simplification"] == "100%"
+def test_advanced_report_trimmed_to_two_cards():
+    moves = [mev(1, "white"), mev(2, "black")]
+    a = _analysis(moves, evals=[0] * 3)
+    out = insights.advanced_report([(FakeGame(color="white"), a)])
+    assert out[0]["title"] == "Tactical awareness & tilt"
+    labels = list(_cards(out))
+    assert labels == ["Opponent-error capitalization", "Cascading-error probability"]
+
+
+# --- progress check (recent vs baseline) ------------------------------------
+
+def _prog_pair(outcome, acc, blunder=False):
+    g = FakeGame(color="white")
+    g.outcome = outcome
+    moves = [mev(p, "white", label="blunder" if (blunder and p == 1) else "ok")
+             for p in range(1, 40, 2)] + [mev(p, "black") for p in range(2, 41, 2)]
+    a = _analysis(moves, evals=[0] * 41)
+    a.accuracy = {"white": acc}
+    return (g, a)
+
+
+def test_progress_report_flags_improvement():
+    # 30 sloppy baseline games (acc 75, a blunder each), then 10 clean ones
+    pairs = ([_prog_pair("loss", 75.0, blunder=True) for _ in range(30)]
+             + [_prog_pair("win", 90.0) for _ in range(10)])
+    out = insights.progress_report(pairs)
+    assert out and out[0]["title"].startswith("Progress check")
+    tbl = [w for w in out[0]["widgets"] if w["type"] == "table"][0]
+    rows = {r[0]: r for r in tbl["rows"]}
+    assert "better" in rows["Accuracy"][3]
+    assert "better" in rows["Blunders / 100 moves"][3]
+
+
+def test_progress_report_gates_small_samples():
+    assert insights.progress_report([_prog_pair("win", 90.0)] * 10) == []

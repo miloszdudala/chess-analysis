@@ -309,6 +309,7 @@ def api_conversion():
 
     pairs = _analysed_pairs(user, fmt, n, depth)
     sections = (insights.outcome_reasons(pairs, cp)
+                + insights.progress_report(pairs, cp)
                 + insights.accuracy_trend(pairs)
                 + insights.eval_curve(pairs)
                 + insights.conversion_report(pairs, cp)

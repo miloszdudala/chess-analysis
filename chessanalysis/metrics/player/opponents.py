@@ -53,26 +53,3 @@ def by_opponent_strength(ctx):
     if not rows:
         return None
     return W.table(["Opponent", "Games", "W", "D", "L", "Win%", "Avg Δ", ""], rows)
-
-
-@metric("player", title="Opponent strength by result", order=31, category="Opponents")
-def strength_by_result(ctx):
-    agg = {o: {"opp": [], "gap": []} for o in ("win", "draw", "loss")}
-    for g in ctx.games:
-        if not g.opp_elo:
-            continue
-        agg[g.outcome]["opp"].append(g.opp_elo)
-        if g.user_elo:
-            agg[g.outcome]["gap"].append(g.opp_elo - g.user_elo)
-
-    rows = []
-    for outcome, label in (("win", "Won"), ("draw", "Drew"), ("loss", "Lost")):
-        opp, gap = agg[outcome]["opp"], agg[outcome]["gap"]
-        if not opp:
-            continue
-        avg_opp = round(sum(opp) / len(opp))
-        avg_gap = f"{round(sum(gap) / len(gap)):+d}" if gap else "—"
-        rows.append([label, len(opp), avg_opp, avg_gap])
-    if not rows:
-        return None
-    return W.table(["Result", "Games", "Avg opponent Elo", "Avg gap"], rows)

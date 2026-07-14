@@ -218,7 +218,8 @@ const WIDGETS = {
   line: (w) => {
     const id = "chart-" + Math.random().toString(36).slice(2);
     pendingCharts.push({ id, series: w.series, toolbar: w.toolbar !== false,
-                         agg: w.agg || "last", ma: !!w.ma, yMax: w.y_max ?? null });
+                         agg: w.agg || "last", ma: !!w.ma, yMax: w.y_max ?? null,
+                         variants: w.variants || null, games: w.games || null });
     return `<div class="chart-host" id="${id}"></div>`;
   },
   recent: () => {
@@ -260,9 +261,9 @@ function renderWidget(w) {
 
 // ---------------------------------------------------------- interactive chart
 
-function buildRatingChart(host, series, ma = false, yMax = null) {
+function buildRatingChart(host, series, ma = false, yMax = null, onPick = null) {
   const pts = (series[0] && series[0].points) || [];
-  const data = pts.map((p, i) => ({ i, date: p.x, y: p.y }));
+  const data = pts.map((p, i) => ({ i, date: p.x, y: p.y, src: p }));
   if (data.length < 2) return;
   const W = host.clientWidth || 880, H = 280;
   const M = { l: 46, r: 14, t: 12, b: 26 };
@@ -406,6 +407,11 @@ function buildRatingChart(host, series, ma = false, yMax = null) {
       let b = Math.ceil(dom[0] + ((x1 - M.l) / pw) * (dom[1] - dom[0]));
       a = Math.max(0, a); b = Math.min(n - 1, b);
       if (b - a >= 1) { dom = [a, b]; draw(); }
+    } else if (onPick) {
+      // a still click (not a brush): pick the nearest data point
+      let idx = Math.round(dom[0] + ((x0 - M.l) / pw) * (dom[1] - dom[0]));
+      idx = Math.max(Math.ceil(dom[0]), Math.min(Math.floor(dom[1]), idx));
+      if (data[idx]) onPick(data[idx]);
     }
   });
   svg.addEventListener("dblclick", () => { dom = [0, n - 1]; draw(); });
@@ -1054,7 +1060,8 @@ async function initConversion(host) {
       pendingCharts = []; pendingEvals = []; pendingEvalCurves = [];
       body.innerHTML = d.sections.map((s) =>
         `<h3>${esc(s.title)}</h3>` + s.widgets.map(renderWidget).join("")).join("");
-      pendingCharts.forEach((c) => c.toolbar ? initChart($(c.id), c.series, c.agg, c.ma, c.yMax)
+      pendingCharts.forEach((c) => c.variants ? initVariantChart($(c.id), c.variants, c.yMax, c.games)
+        : c.toolbar ? initChart($(c.id), c.series, c.agg, c.ma, c.yMax)
         : buildRatingChart($(c.id), c.series, c.ma, c.yMax));
       pendingEvals.forEach((e) => buildEvalChart($(e.id), e.plies, e.moves, e.me));
       pendingEvalCurves.forEach((e) => buildEvalCurve($(e.id), e.groupings, e.default, e.y_label));
@@ -1080,6 +1087,63 @@ async function gotoGame(id, ply = null) {
     else
       window.scrollTo({ top: 0, behavior: "smooth" });
   } catch (e) { setStatus(e.message, true); }
+}
+
+// A line chart whose whole series can be swapped by a toolbar (e.g. the form
+// chart's 10/20/30-game rolling windows). Each variant: {label, points, default}.
+// With a `games` roster, clicking a point lists the games its window covers
+// (each point's i0/i1 index into the roster); rows open that game's review.
+function initVariantChart(host, variants, yMax = null, games = null) {
+  let cur = variants.find((v) => v.default) || variants[0];
+  const bar = document.createElement("div"); bar.className = "chart-toolbar";
+  const wrap = document.createElement("div"); wrap.className = "chart-wrap";
+  const hint = document.createElement("div"); hint.className = "chart-hint";
+  const detail = document.createElement("div");
+  hint.textContent = "drag / scroll to zoom · double-click to reset" +
+    (games ? " · click a point to see its games" : "");
+  variants.forEach((v) => {
+    const b = document.createElement("button");
+    b.className = "gbtn" + (v === cur ? " on" : "");
+    b.textContent = v.label;
+    b.onclick = () => {
+      cur = v;
+      [...bar.children].forEach((c) => c.classList.toggle("on", c === b));
+      render();
+    };
+    bar.appendChild(b);
+  });
+  host.appendChild(bar); host.appendChild(wrap); host.appendChild(hint);
+  host.appendChild(detail);
+
+  function showWindow(d) {
+    const p = d.src || {};
+    if (p.i0 == null || p.i1 == null) return;
+    const win = games.slice(p.i0, p.i1);
+    const rows = win.slice().reverse().map((g) => {
+      const res = g.outcome === "win" ? "✓" : g.outcome === "loss" ? "✗" : "=";
+      const rc = g.outcome === "win" ? "res-win" : g.outcome === "loss" ? "res-loss" : "";
+      return `<tr class="rrow" data-game-id="${esc(g.id)}">` +
+        `<td class="${rc}">${res}</td><td>${esc(g.date)}</td>` +
+        `<td>${esc(g.opponent)} (${g.opp_elo || "?"})</td></tr>`;
+    }).join("");
+    const w = win.filter((g) => g.outcome === "win").length;
+    const dr = win.filter((g) => g.outcome === "draw").length;
+    const l = win.filter((g) => g.outcome === "loss").length;
+    detail.innerHTML =
+      `<div class="reasons-head">Performance ${d.y} — the ${win.length} games ` +
+      `ending ${esc(d.date)} (${w}-${dr}-${l}, newest first) ` +
+      `<a href="#" id="vc-close">✕ close</a></div>` +
+      `<table class="recent-tbl reason-games"><tbody>${rows}</tbody></table>`;
+    const close = detail.querySelector("#vc-close");
+    if (close) close.onclick = (e) => { e.preventDefault(); detail.innerHTML = ""; };
+  }
+
+  function render() {
+    wrap.innerHTML = ""; detail.innerHTML = "";
+    buildRatingChart(wrap, [{ name: cur.label, points: cur.points }], false, yMax,
+                     games ? showWindow : null);
+  }
+  render();
 }
 
 function initChart(host, series, agg = "last", ma = false, yMax = null) {
@@ -1154,7 +1218,8 @@ function renderSections() {
   $("result").innerHTML = `<h1>${esc(doc.title)}${link}</h1>` +
     (doc.subtitle ? `<p class="sub-title">${esc(doc.subtitle)}</p>` : "") + html;
   document.title = doc.title + " · Chess Analyzer";
-  pendingCharts.forEach((c) => c.toolbar ? initChart($(c.id), c.series, c.agg, c.ma, c.yMax)
+  pendingCharts.forEach((c) => c.variants ? initVariantChart($(c.id), c.variants, c.yMax, c.games)
+    : c.toolbar ? initChart($(c.id), c.series, c.agg, c.ma, c.yMax)
     : buildRatingChart($(c.id), c.series, c.ma, c.yMax));
   pendingRecents.forEach((id) => initRecent($(id)));
   pendingConversions.forEach((id) => initConversion($(id)));

@@ -4,11 +4,14 @@ A Game is bound to one user: fields like `color`, `outcome`, `user_elo` are
 always from that user's point of view, so stats never re-derive perspective.
 Moves are parsed too (SAN, clock, annotation NAG) so move-level stats —
 time management, blunder counts — have data without re-parsing.
+
+PGN text itself lives in `store` (one SQLite file), not in a folder of files,
+so loading a player's games is an indexed lookup rather than a parse of every
+game on disk. This module is the translation layer between the two: rows in,
+`Game` objects out, and `game_row` back the other way.
 """
 from __future__ import annotations
 
-import glob
-import os
 import re
 from dataclasses import dataclass, field
 
@@ -171,8 +174,8 @@ def _parse_moves(movetext: str) -> list[Move]:
     return moves
 
 
-def parse_pgn_file(path: str) -> list[Game]:
-    """Parse every game in a (possibly multi-game) PGN file. No perspective yet."""
+def parse_pgn_text(text: str) -> list[Game]:
+    """Parse every game in a (possibly multi-game) PGN string. No perspective yet."""
     games: list[Game] = []
     headers: dict = {}
     movetext: list[str] = []
@@ -187,23 +190,60 @@ def parse_pgn_file(path: str) -> list[Game]:
                 pgn="\n".join(raw),
             ))
 
-    with open(path, encoding="utf-8", errors="replace") as f:
-        for line in f:
-            tag = _TAG_RE.match(line)
-            if tag:
-                if in_moves:        # a new game's headers begin
-                    flush()
-                    headers, movetext, raw, in_moves = {}, [], [], False
-                headers[tag.group(1)] = tag.group(2)
-            elif line.strip() == "":
-                if headers and not in_moves:
-                    in_moves = True
-            else:
+    for line in text.splitlines():
+        tag = _TAG_RE.match(line)
+        if tag:
+            if in_moves:            # a new game's headers begin
+                flush()
+                headers, movetext, raw, in_moves = {}, [], [], False
+            headers[tag.group(1)] = tag.group(2)
+        elif line.strip() == "":
+            if headers and not in_moves:
                 in_moves = True
-                movetext.append(line.strip())
-            raw.append(line.rstrip("\n"))
+        else:
+            in_moves = True
+            movetext.append(line.strip())
+        raw.append(line)
     flush()
     return games
+
+
+def parse_pgn_file(path: str) -> list[Game]:
+    """Parse a PGN file from disk — used when importing games into the store."""
+    with open(path, encoding="utf-8", errors="replace") as f:
+        return parse_pgn_text(f.read())
+
+
+def _int(value: str):
+    return int(value) if value.isdigit() else None
+
+
+def game_row(game: Game, source: str = "own") -> dict:
+    """A parsed Game as a `store.games` row.
+
+    The rating columns (`level`, `band`, `gap`) are denormalised so bracket
+    statistics are a SQL aggregate over indexed integers and never have to
+    touch, let alone parse, the PGN text.
+    """
+    from . import store
+
+    welo, belo = _int(game.h("WhiteElo")), _int(game.h("BlackElo"))
+    level = band = gap = None
+    if welo is not None and belo is not None:
+        level = (welo + belo) // 2
+        band = level // 100 * 100
+        gap = abs(welo - belo)
+    return {
+        "gid": str(game.game_id),
+        "white": game.h("White").lower(), "black": game.h("Black").lower(),
+        "welo": welo, "belo": belo,
+        "time_control": game.time_control, "time_class": game.time_class,
+        "date": game.date, "sort_key": game.sort_key,
+        "eco": game.eco, "result": game.result,
+        "termination": game.termination[:80], "plies": len(game.moves),
+        "level": level, "band": band, "gap": gap,
+        "source": source, "pgn": store.pack_pgn(game.pgn),
+    }
 
 
 def bind(game: Game, user: str) -> Game | None:
@@ -234,8 +274,8 @@ def bind(game: Game, user: str) -> Game | None:
     return game
 
 
-def load_games(folder: str, user: str, include_flagged: bool = False) -> list[Game]:
-    """Load all PGNs in `folder`, bound to `user`, sorted chronologically.
+def load_games(user: str, include_flagged: bool = False) -> list[Game]:
+    """Every stored game `user` played, bound to them, sorted chronologically.
 
     Two kinds of game are left out unless `include_flagged`: those the player
     flagged as unrepresentative (see `overrides`), and those played against an
@@ -248,16 +288,16 @@ def load_games(folder: str, user: str, include_flagged: bool = False) -> list[Ga
     refund is only readable with every sample present, and the correction has
     to be in place before anything downstream reads `user_elo`.
     """
-    from . import fairplay, overrides, ratings
+    from . import fairplay, overrides, ratings, store
 
     games: list[Game] = []
     seen: set[str] = set()
-    for path in glob.glob(os.path.join(folder, "*.pgn")):
-        for g in parse_pgn_file(path):
+    for row in store.games_of(user):
+        for g in parse_pgn_text(store.unpack_pgn(row["pgn"])):
             bound = bind(g, user)
             if not bound:
                 continue
-            if bound.game_id in seen:   # same game in two files — keep one
+            if bound.game_id in seen:   # the same game reached us twice
                 continue
             seen.add(bound.game_id)
             games.append(bound)

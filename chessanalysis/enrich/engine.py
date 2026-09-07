@@ -1,7 +1,8 @@
 """Stockfish-backed per-move analysis: evals, centipawn loss, accuracy.
 
-Caches raw engine output (evals + best moves) per game on disk, so re-runs are
-instant and tweaking the classification thresholds never needs a re-run.
+Raw engine output (evals + best moves) is kept per game and depth in `store`,
+so re-runs are instant and tweaking the classification thresholds never needs
+a re-run — every number here is derived from that raw output by `_derive`.
 """
 from __future__ import annotations
 
@@ -15,7 +16,7 @@ import chess
 import chess.engine
 import chess.pgn
 
-from .. import cache, config
+from .. import config, store
 
 MATE_CP = 10000
 # win%-drop thresholds (percentage points), à la Lichess.
@@ -303,24 +304,21 @@ def _derive(raw: dict, depth: int, engine_name: str) -> GameAnalysis:
 
 
 def deepest_cached(game, minimum: int) -> int:
-    """The deepest usable cached depth for a game, or `minimum` if nothing
-    deeper is on disk. Lets the stats pages reuse a review-depth analysis
-    instead of re-running the engine at their own shallower depth.
+    """The deepest stored depth for a game, or `minimum` if nothing deeper is
+    known. Lets the stats pages reuse a review-depth analysis instead of
+    re-running the engine at their own shallower depth.
 
-    Only caches that `analyse_game` would actually honour count — a stale
-    entry without `top_moves` would trigger a recompute at that deeper (i.e.
-    slower) depth, which defeats the point.
+    Only analyses that `analyse_game` would actually honour count — one
+    without `top_moves` (a bulk corpus pass runs multipv 1, which has none)
+    would trigger a recompute at that deeper, i.e. slower, depth, which
+    defeats the point.
     """
     best = minimum
-    for key in cache.keys("engine", f"{game.game_id}_d"):
-        try:
-            d = int(key.rsplit("_d", 1)[1])
-        except (IndexError, ValueError):
-            continue
+    for d in store.analysed_depths(game.game_id):
         if d <= best:
             continue
-        c = cache.load("engine", key)
-        if c and c.get("evals") and c.get("top_moves"):
+        raw = store.load_analysis(game.game_id, d)
+        if raw and raw.get("evals") and raw.get("top_moves"):
             best = d
     return best
 
@@ -330,9 +328,10 @@ def analyse_game(game, depth: int | None = None, engine=None) -> GameAnalysis:
     if depth is None:
         depth = int(config.get("ENGINE_DEPTH", "15"))
 
-    cached = cache.load("engine", f"{game.game_id}_d{depth}")
-    # `top_moves` was added later; recompute caches that predate it so the
-    # board explorer always has engine arrows.
+    cached = store.load_analysis(game.game_id, depth)
+    # An analysis without `top_moves` (an old cache entry, or a bulk corpus
+    # pass run at multipv 1) is recomputed, so the board explorer always has
+    # engine arrows.
     if cached and cached.get("evals") and cached.get("top_moves"):
         return _derive(cached, depth, cached.get("engine_name", "cache"))
 
@@ -347,5 +346,5 @@ def analyse_game(game, depth: int | None = None, engine=None) -> GameAnalysis:
             engine.quit()
 
     raw["engine_name"] = engine_name
-    cache.save("engine", f"{game.game_id}_d{depth}", raw)
+    store.save_analysis(game.game_id, depth, raw, multipv=3, engine=engine_name)
     return _derive(raw, depth, engine_name)

@@ -4,7 +4,10 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const state = { cfg: null, mode: "player", doc: null, category: null };
-const MODE_LABELS = { player: "Player report", game: "Game review", compare: "Compare" };
+const MODE_LABELS = { player: "Player report", game: "Game review",
+  peers: "Peers", brackets: "Brackets", compare: "Compare" };
+// tabs built on the rating corpus — both offer the Expand database button
+const CORPUS_MODES = ["peers", "brackets"];
 const FORMATS = ["bullet", "blitz", "rapid"];
 
 async function getJSON(url) {
@@ -1324,6 +1327,22 @@ function renderControls() {
     c.innerHTML = field("Format", `<select id="f-fmt">${opts}</select>`) +
       `<button class="go" id="run">Show stats</button>`;
     $("f-fmt").value = "rapid";
+  } else if (CORPUS_MODES.includes(state.mode)) {
+    const win = state.mode === "peers"
+      ? field("Rating window", `<select id="f-win">` +
+          [50, 70, 100, 150].map((w) =>
+            `<option value="${w}"${w === 70 ? " selected" : ""}>± ${w}</option>`).join("") +
+          `</select>`)
+      : "";
+    c.innerHTML = win +
+      field("Expand by", `<select id="f-n">` +
+        [50, 100, 250, 500].map((n) =>
+          `<option value="${n}"${n === 100 ? " selected" : ""}>${n} games</option>`).join("") +
+        `</select>`) +
+      `<button class="go" id="run">${state.mode === "peers" ? "Compare" : "Show ladder"}</button>` +
+      `<button class="sync" id="expand" title="Fetch more games and analyse them, filling the thinnest rating bands first">⊕ Expand database</button>`;
+    $("expand").onclick = expandCorpus;
+    showCorpusSize();
   } else if (state.mode === "game") {
     c.innerHTML = field("Game", `<select class="wide" id="f-game"><option value="last">Loading…</option></select>` +
         `<span class="gf-count" id="f-game-flagged"></span>`) +
@@ -1335,6 +1354,47 @@ function renderControls() {
       `<button class="go" id="run">Compare</button>`;
   }
   $("run").onclick = run;
+}
+
+// --- the rating corpus ------------------------------------------------------
+// Expanding is a long background job on the server (fetch, then Stockfish over
+// every new game), so the button starts it and the page polls for progress.
+
+async function showCorpusSize() {
+  try {
+    const d = await getJSON("/api/corpus");
+    const thin = (d.coverage || []).slice().sort((a, b) => a.samples - b.samples)[0];
+    setStatus(`Corpus: ${d.games} games from ${d.players} players · ` +
+      `${d.samples} samples at depth ${d.depth}` +
+      (thin ? ` · thinnest band ${thin.band}–${thin.band + 99} (${thin.samples})` : ""));
+  } catch (e) { /* an empty corpus is not an error — Expand fixes it */ }
+}
+
+async function pollExpand() {
+  const d = await getJSON("/api/corpus");
+  const j = d.job || {};
+  if (j.running) {
+    setStatus(`Expanding… ${j.note || ""} (${j.elapsed}s)`, false, true);
+    setTimeout(() => pollExpand().catch(() => {}), 1500);
+    return;
+  }
+  const btn = $("expand");
+  if (btn) btn.disabled = false;
+  if (j.error) { setStatus("Expand failed: " + j.error, true); return; }
+  setStatus(`Added ${j.banked || 0} games (${j.analysed || 0} analysed) · ` +
+    `corpus now ${d.games} games, ${d.samples} samples. Re-run to see them.`);
+}
+
+async function expandCorpus() {
+  const user = currentUser();
+  if (!user) { setStatus("Type a Chess.com username above.", true); return; }
+  const btn = $("expand");
+  btn.disabled = true;
+  try {
+    await fetch(`/api/corpus/expand?user=${encodeURIComponent(user)}` +
+      `&n=${$("f-n").value}`, { method: "POST" });
+    pollExpand().catch((e) => setStatus(e.message, true));
+  } catch (e) { setStatus(e.message, true); btn.disabled = false; }
 }
 
 async function loadGames() {
@@ -1377,6 +1437,12 @@ async function run() {
     if (state.mode === "player") {
       url = `/api/player?user=${u}&format=${$("f-fmt").value}`;
       busy = "Building report…";
+    } else if (state.mode === "peers") {
+      url = `/api/peers?user=${u}&window=${$("f-win").value}`;
+      busy = "Comparing you with your band…";
+    } else if (state.mode === "brackets") {
+      url = `/api/brackets?user=${u}`;
+      busy = "Building the ladder…";
     } else if (state.mode === "game") {
       url = `/api/game?user=${u}&selector=${encodeURIComponent($("f-game").value)}` +
         `&depth=${$("f-depth").value}`;

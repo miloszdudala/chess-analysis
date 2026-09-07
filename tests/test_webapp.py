@@ -101,7 +101,7 @@ def offline_sync(monkeypatch):
 
     scraped = []
 
-    def fake_scrape(user, out_dir, *a, **k):
+    def fake_scrape(user, *a, **k):
         scraped.append(user)
         return {"new": 2, "skipped": 1, "requests": 3}
 

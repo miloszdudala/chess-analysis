@@ -105,25 +105,29 @@ PGN = """[Event "Live Chess"]
 """
 
 
-def _library(tmp_path):
+def _library():
+    """Two stored games between 'me' and 'opp'."""
+    from chessanalysis import model, store
+
+    rows = []
     for n, (gid, result) in enumerate([("111", "1-0"), ("222", "0-1")], start=1):
-        (tmp_path / f"g{gid}.pgn").write_text(
-            PGN.format(white="me", black="opp", result=result, n=n, gid=gid))
-    return str(tmp_path)
+        text = PGN.format(white="me", black="opp", result=result, n=n, gid=gid)
+        rows += [model.game_row(g, source="own") for g in model.parse_pgn_text(text)]
+    store.save_games(rows)
 
 
 def test_load_games_drops_flagged_but_can_include_them(tmp_path, monkeypatch):
     from chessanalysis.model import load_games
 
     monkeypatch.setattr(overrides, "_PATH", str(tmp_path / "ov.json"))
-    folder = _library(tmp_path)
-    assert {g.game_id for g in load_games(folder, "me")} == {"111", "222"}
+    _library()
+    assert {g.game_id for g in load_games("me")} == {"111", "222"}
 
     overrides.set_flag("111", "anomaly", "server died")
     # statistics see only the honest game...
-    assert [g.game_id for g in load_games(folder, "me")] == ["222"]
+    assert [g.game_id for g in load_games("me")] == ["222"]
     # ...while the history still lists both
-    assert {g.game_id for g in load_games(folder, "me", include_flagged=True)} \
+    assert {g.game_id for g in load_games("me", include_flagged=True)} \
         == {"111", "222"}
 
 

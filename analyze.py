@@ -40,7 +40,6 @@ def main():
     ap.add_argument("mode", nargs="?", default="player",
                     choices=modes.names(), help="report mode (default: player)")
     ap.add_argument("args", nargs="*", help="mode arguments (see examples)")
-    ap.add_argument("--games", default=config.get("GAMES_DIR", "games"))
     ap.add_argument("--out", help="output HTML path (default depends on mode)")
     ap.add_argument("--depth", type=int, help="engine depth (game mode)")
     args = ap.parse_args()
@@ -52,7 +51,7 @@ def main():
         username = args.args[0] if args.args else user
         if not username:
             raise SystemExit("No username. Pass one or set CHESS_USERNAME in .env.")
-        doc = fn(username, games_dir=args.games)
+        doc = fn(username)
         out = args.out or config.get("REPORT_FILE", "report.html")
 
     elif args.mode == "game":
@@ -60,14 +59,14 @@ def main():
         selector = args.args[0] if args.args else "last"
         if not username:
             raise SystemExit("No username. Set CHESS_USERNAME in .env.")
-        doc = fn(username, games_dir=args.games, selector=selector, depth=args.depth)
+        doc = fn(username, selector=selector, depth=args.depth)
         gid = doc.meta.get("game_id", "game")
         out = args.out or os.path.join("out", f"game-{gid}.html")
 
     elif args.mode == "compare":
         if len(args.args) < 2:
             raise SystemExit("compare needs two players: analyze.py compare A B")
-        doc = fn(args.args[0], args.args[1], games_dir=args.games)
+        doc = fn(args.args[0], args.args[1])
         out = args.out or os.path.join("out", f"compare-{args.args[0]}-{args.args[1]}.html")
 
     json_path = _write(doc, out)

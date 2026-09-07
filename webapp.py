@@ -15,12 +15,11 @@ from functools import wraps
 
 from flask import Flask, Response, jsonify, request, send_from_directory
 
-from chessanalysis import config, modes, render_html
+from chessanalysis import config, modes, render_html, store
 from chessanalysis.model import load_games
 
 app = Flask(__name__, static_folder=None)
 FRONTEND = os.path.join(os.path.dirname(__file__), "frontend")
-GAMES_DIR = config.get("GAMES_DIR", "games")
 
 # One long-lived engine for interactive variation analysis (/api/analyse).
 # A lock serialises access since the dev server may handle requests in threads.
@@ -43,16 +42,13 @@ def _analyse_engine():
 # the background; progress + a live ETA are polled from /api/prewarm.
 _PREWARM_LOCK = threading.Lock()
 _PREWARM_THREAD = None
+_EXPAND_THREAD = None
 _PREWARM = {"running": False, "finished": False, "error": None, "depth": 0,
             "total": 0, "already": 0, "to_compute": 0, "done": 0,
             "computed": 0, "compute_time": 0.0, "eta": None, "start": 0.0}
 # rough per-game time for a depth-15 full-game pass on this machine; only used
 # for the very first estimate, then replaced by the measured average.
 EST_SECONDS_PER_GAME = 33
-
-
-def _prewarm_key(game, depth):
-    return f"{game.game_id}_d{depth}"
 
 
 def _prewarm_snapshot():
@@ -63,16 +59,15 @@ def _prewarm_snapshot():
 
 def _prewarm_worker(user, depth):
     import chess.engine
-    from chessanalysis import cache
     from chessanalysis.enrich import engine as eng
 
     try:
         # flagged games included: they leave the stats but stay reviewable, and
         # Game Review should open them just as fast
-        games = load_games(GAMES_DIR, user, include_flagged=True)
+        games = load_games(user, include_flagged=True)
         todo, already = [], 0
         for g in games:
-            c = cache.load("engine", _prewarm_key(g, depth))
+            c = store.load_analysis(g.game_id, depth)
             if c and c.get("evals") and c.get("top_moves"):
                 already += 1
             else:
@@ -168,8 +163,8 @@ def _sync(user, force=False):
     if not force and age < SYNC_MIN_INTERVAL:
         return {"user": user, "new": 0, "skipped": 0, "requests": 0,
                 "fresh": True, "banned": []}
-    res = scraper.scrape(user, GAMES_DIR)   # hits the Chess.com API
-    games = load_games(GAMES_DIR, user, include_flagged=True)
+    res = scraper.scrape(user)             # hits the Chess.com API
+    games = load_games(user, include_flagged=True)
     res["banned"] = fairplay.refresh([g.opponent for g in games])["banned"]
     _LAST_SYNC[user.lower()] = time.time()
     res["user"] = user
@@ -192,16 +187,14 @@ def api_scrape():
 def api_prewarm_status():
     """Progress of the background review-cache warm-up. When idle, reports how
     many games still need analysis and a rough time estimate to do them."""
-    from chessanalysis import cache
-
     with _PREWARM_LOCK:
         if _PREWARM["running"] or _PREWARM["finished"]:
             return jsonify(_prewarm_snapshot())
 
     user = request.args.get("user") or config.get("CHESS_USERNAME")
     depth = int(config.get("ENGINE_DEPTH", "15"))
-    games = load_games(GAMES_DIR, user, include_flagged=True)   # all reviewable
-    already = sum(1 for g in games if cache.exists("engine", _prewarm_key(g, depth)))
+    games = load_games(user, include_flagged=True)   # all reviewable
+    already = sum(1 for g in games if store.has_analysis(g.game_id, depth))
     todo = len(games) - already
     return jsonify({
         "running": False, "finished": False, "error": None, "depth": depth,
@@ -240,7 +233,7 @@ def api_games():
     from chessanalysis import fairplay, overrides
 
     user = request.args.get("user") or config.get("CHESS_USERNAME")
-    games = load_games(GAMES_DIR, user, include_flagged=True)
+    games = load_games(user, include_flagged=True)
     flags = {**overrides.flags(), **fairplay.flags(games)}
     return jsonify([{
         "id": g.game_id, "white": g.h("White"), "black": g.h("Black"),
@@ -257,7 +250,7 @@ def api_player():
     fmt = request.args.get("format") or None
     if not user:
         return jsonify({"error": "No username given."}), 400
-    doc = modes.get("player")(user, games_dir=GAMES_DIR, time_class=fmt)
+    doc = modes.get("player")(user, time_class=fmt)
     return jsonify(doc.to_dict())   # JSON widgets -> rendered client-side
 
 
@@ -277,7 +270,7 @@ def api_recent():
     depth = int(config.get("RECENT_DEPTH", "12"))
     show_flagged = request.args.get("flagged") in ("1", "true", "yes")
 
-    games = load_games(GAMES_DIR, user, include_flagged=True)
+    games = load_games(user, include_flagged=True)
     flags = {**overrides.flags(), **fairplay.flags(games)}
     if fmt:
         games = [g for g in games if g.time_class == fmt]
@@ -323,10 +316,9 @@ def _analysed_pairs(user, fmt, n, depth):
     Review or the pre-warm) is read back at that depth rather than analysed
     again. Depth can therefore vary game to game within one batch."""
     import chess.engine
-    from chessanalysis import cache
     from chessanalysis.enrich import engine as eng
 
-    games = load_games(GAMES_DIR, user)        # chronological (oldest -> newest)
+    games = load_games(user)                   # chronological (oldest -> newest)
     if fmt:
         games = [g for g in games if g.time_class == fmt]
     if n and n > 0:
@@ -336,7 +328,7 @@ def _analysed_pairs(user, fmt, n, depth):
     try:
         for g in games:
             d = eng.deepest_cached(g, depth)
-            if cache.load("engine", f"{g.game_id}_d{d}") is None and proc is None:
+            if not store.has_analysis(g.game_id, d) and proc is None:
                 proc = chess.engine.SimpleEngine.popen_uci(eng.find_engine())
             pairs.append((g, eng.analyse_game(g, depth=d, engine=proc)))
     finally:
@@ -373,7 +365,7 @@ def api_game():
     user = request.args.get("user") or config.get("CHESS_USERNAME")
     selector = request.args.get("selector", "last")
     depth = request.args.get("depth", type=int)
-    doc = modes.get("game")(user, games_dir=GAMES_DIR, selector=selector, depth=depth)
+    doc = modes.get("game")(user, selector=selector, depth=depth)
     return jsonify(doc.to_dict())
 
 
@@ -474,13 +466,116 @@ def api_analyse():
     return jsonify(out)
 
 
+# --- rating corpus: Peers, Brackets, and the Expand button ------------------
+# Same shape as the pre-warm above: one background worker, a lock, a snapshot
+# polled by the UI. Crawling is network-bound and quick; the engine pass is the
+# whole cost, so progress is reported in games analysed.
+_EXPAND_LOCK = threading.Lock()
+_EXPAND = {"running": False, "finished": False, "error": None,
+           "target": 0, "banked": 0, "analysed": 0, "note": "", "start": 0.0}
+CORPUS_WORKERS = int(config.get("CORPUS_WORKERS", "3"))
+
+
+def _expand_snapshot():
+    s = {k: _EXPAND[k] for k in _EXPAND if k != "start"}
+    s["elapsed"] = round(time.time() - _EXPAND["start"]) if _EXPAND["start"] else 0
+    return s
+
+
+def _my_elo(user):
+    from chessanalysis.model import load_games as lg
+    games = [g for g in lg(user) if g.user_elo]
+    return games[-1].user_elo if games else 1500
+
+
+def _expand_worker(user, n):
+    from chessanalysis import corpus
+    from chessanalysis.corpus import analyse, crawl
+
+    try:
+        my_elo = _my_elo(user)
+        depth = corpus.DEPTH
+
+        def log(msg):
+            with _EXPAND_LOCK:
+                _EXPAND["note"] = msg
+
+        with _EXPAND_LOCK:
+            _EXPAND["note"] = "finding games…"
+        banked = crawl.expand(n, user, my_elo, crawl.targets(my_elo, depth),
+                             depth, log=log)
+        with _EXPAND_LOCK:
+            _EXPAND["banked"] = banked
+            _EXPAND["note"] = f"analysing {analyse.pending(depth)} games…"
+        done = analyse.run(CORPUS_WORKERS, depth)
+        with _EXPAND_LOCK:
+            _EXPAND["analysed"] = done
+            _EXPAND["note"] = f"added {banked} games"
+    except Exception as e:                       # noqa: BLE001
+        with _EXPAND_LOCK:
+            _EXPAND["error"] = f"{type(e).__name__}: {e}"
+    finally:
+        with _EXPAND_LOCK:
+            _EXPAND["running"] = False
+            _EXPAND["finished"] = True
+
+
+@app.get("/api/corpus")
+@api
+def api_corpus_status():
+    """Corpus size, per-band coverage, and any expansion in flight."""
+    from chessanalysis import corpus
+
+    with _EXPAND_LOCK:
+        job = _expand_snapshot()
+    return jsonify({**corpus.totals(), "coverage": corpus.coverage(), "job": job})
+
+
+@app.post("/api/corpus/expand")
+@api
+def api_corpus_expand():
+    """Grow the corpus by `n` games, then analyse them. Runs in the background."""
+    global _EXPAND_THREAD
+    user = request.args.get("user") or config.get("CHESS_USERNAME")
+    n = request.args.get("n", default=100, type=int)
+    if not user:
+        return jsonify({"error": "No username given."}), 400
+    with _EXPAND_LOCK:
+        if _EXPAND["running"]:
+            return jsonify(_expand_snapshot())
+        _EXPAND.update(running=True, finished=False, error=None, target=n,
+                       banked=0, analysed=0, note="starting…", start=time.time())
+    _EXPAND_THREAD = threading.Thread(target=_expand_worker, args=(user, n),
+                                      daemon=True)
+    _EXPAND_THREAD.start()
+    with _EXPAND_LOCK:
+        return jsonify(_expand_snapshot())
+
+
+@app.get("/api/peers")
+@api
+def api_peers():
+    user = request.args.get("user") or config.get("CHESS_USERNAME")
+    window = request.args.get("window", default=70, type=int)
+    if not user:
+        return jsonify({"error": "No username given."}), 400
+    return jsonify(modes.get("peers")(user, window=window).to_dict())
+
+
+@app.get("/api/brackets")
+@api
+def api_brackets():
+    user = request.args.get("user") or config.get("CHESS_USERNAME")
+    return jsonify(modes.get("brackets")(user or "").to_dict())
+
+
 @app.get("/api/compare")
 @api
 def api_compare():
     a, b = request.args.get("a"), request.args.get("b")
     if not a or not b:
         return jsonify({"error": "compare needs two players (a and b)."}), 400
-    return jsonify(modes.get("compare")(a, b, games_dir=GAMES_DIR).to_dict())
+    return jsonify(modes.get("compare")(a, b).to_dict())
 
 
 if __name__ == "__main__":

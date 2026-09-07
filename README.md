@@ -15,7 +15,7 @@ brew install stockfish                            # engine for game review
 cp .env.example .env                              # optional: a default username
 ```
 
-`.env` (gitignored) holds `CHESS_USERNAME`, `GAMES_DIR`, `REPORT_FILE`,
+`.env` (gitignored) holds `CHESS_USERNAME`, `CHESS_DB`, `REPORT_FILE`,
 `STOCKFISH_PATH`, `ENGINE_DEPTH`. `CHESS_USERNAME` only pre-fills the web app's
 username box — type any account there to analyse it.
 
@@ -69,7 +69,25 @@ In the browser, pick a tab:
 - **Game review** — pick a game and depth; Stockfish reports accuracy, an eval
   graph, annotated key moments, and the **conversion** stat (when the eval first
   crossed ±X and whether it held).
+- **Peers** — you against the players actually at your rating, in the same
+  currency: their games are analysed with the same engine at the same depth as
+  yours. Accuracy and its percentile, then the phase split — opening,
+  middlegame, endgame — which is where the diagnosis usually lives.
+- **Brackets** — the ladder: every stat, band by band, with accuracy and
+  blunder rate per phase plotted against rating.
 - **Compare** — two players side by side.
+
+Both corpus tabs carry **⊕ Expand database**, which fetches more games and
+analyses them in the background, filling the thinnest rating band first.
+
+### Where the data lives
+
+Everything is one SQLite file, `data/chess.db`: the PGN of every game (yours
+and, for the rating-bracket work, other players'), and every engine analysis
+ever computed, keyed by game and depth. Loading a player's games is an indexed
+lookup rather than a parse of every game on disk, de-duplication is a primary
+key, and tens of thousands of games cost neither tens of thousands of inodes
+nor an `os.listdir` per lookup.
 
 ### Syncing, and games that don't count
 
@@ -105,7 +123,7 @@ The same reports can be generated as static files without the server:
 ```
 
 Each run writes both `<name>.html` and `<name>.json` (the same Document the web
-app consumes). Engine analysis is cached to `data/cache/`, so re-runs are instant.
+app consumes). Engine analysis is kept in the store, so re-runs are instant.
 
 ## Architecture
 
@@ -116,6 +134,9 @@ webapp.py                  Flask app: serves the same Documents over /api/<mode>
 frontend/                  index.html + app.js: mode picker, JS widget renderer,
                            interactive rating chart
 chessanalysis/
+├── store.py               data/chess.db — every game and every engine analysis
+├── corpus/                rating-bracket corpus: SQL aggregates, crawler,
+│                          sharded depth-10 engine pass (2 samples per game)
 ├── model.py               PGN → perspective-bound Game objects (+ parsed moves, clocks)
 ├── fairplay.py            opponents Chess.com closed for cheating (cached lookups)
 ├── ratings.py             rebases the rating curve around a refunded cheated game

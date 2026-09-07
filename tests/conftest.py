@@ -10,7 +10,7 @@ from __future__ import annotations
 import chess
 import pytest
 
-from chessanalysis import cache
+from chessanalysis import cache, store
 from chessanalysis.enrich import engine as eng
 
 
@@ -84,3 +84,16 @@ def isolated_cache(tmp_path, monkeypatch):
     """Point the on-disk cache at a temp dir so tests never touch real caches."""
     monkeypatch.setattr(cache, "CACHE_DIR", str(tmp_path / "cache"))
     return tmp_path
+
+
+@pytest.fixture(autouse=True)
+def isolated_store(tmp_path, monkeypatch):
+    """Every test gets its own empty store.
+
+    Autouse on purpose: the store holds real games and real engine analyses,
+    and a test that wrote into it would corrupt them silently.
+    """
+    monkeypatch.setattr(store, "DB_PATH", str(tmp_path / "test-chess.db"))
+    store.reset()
+    yield store
+    store.reset()

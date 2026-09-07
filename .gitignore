@@ -1,4 +1,7 @@
 # Personal game data — never commit (contains account names & game history)
+data/chess.db
+data/chess.db-wal
+data/chess.db-shm
 games/
 *.pgn
 

@@ -13,12 +13,11 @@ from ..model import load_games
 
 
 @mode("player")
-def player_report(username: str, games_dir: str = "games",
-                  time_class: str | None = None) -> Document:
-    games = load_games(games_dir, username)
+def player_report(username: str, time_class: str | None = None) -> Document:
+    games = load_games(username)
     if not games:
         raise SystemExit(
-            f"No games for '{username}' in '{games_dir}/'. Run scraper.py first."
+            f"No games stored for '{username}'. Run scraper.py first."
         )
     if time_class:
         games = [g for g in games if g.time_class == time_class]

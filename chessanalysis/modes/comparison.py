@@ -12,9 +12,9 @@ from ..model import load_games
 
 
 @mode("compare")
-def comparison(player_a: str, player_b: str, games_dir: str = "games") -> Document:
-    a = PlayerContext(player_a, load_games(games_dir, player_a))
-    b = PlayerContext(player_b, load_games(games_dir, player_b))
+def comparison(player_a: str, player_b: str) -> Document:
+    a = PlayerContext(player_a, load_games(player_a))
+    b = PlayerContext(player_b, load_games(player_b))
     head_to_head = [g for g in a.games
                     if g.opponent.lower() == player_b.lower()]
     ctx = CompareContext(a=a, b=b, head_to_head=head_to_head)

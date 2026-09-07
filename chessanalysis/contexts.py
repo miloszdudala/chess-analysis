@@ -31,3 +31,24 @@ class CompareContext:
     a: PlayerContext
     b: PlayerContext
     head_to_head: list[Game] = field(default_factory=list)
+
+
+@dataclass
+class CohortContext:
+    """scope="peers" / "brackets" — the rating corpus, aggregated.
+
+    Metrics get finished aggregates rather than games: a bracket statistic is a
+    SQL sum over millions of moves, and materialising them would defeat the
+    point of storing the corpus outside memory.
+    """
+    user: str
+    depth: int
+    lo: int = 0                     # peers: the rating window compared against
+    hi: int = 0
+    band: int | None = None         # peers: the band you sit in
+    me: dict | None = None          # your aggregate, same engine + depth
+    cohort: dict | None = None      # the cohort's aggregate
+    bands: list = field(default_factory=list)      # brackets: the ladder
+    hist: list = field(default_factory=list)       # peers: accuracy distribution
+    percentile: int | None = None
+    totals: dict = field(default_factory=dict)

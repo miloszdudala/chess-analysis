@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from chessanalysis import cache
+from chessanalysis import store
 from chessanalysis.enrich import engine as eng
 from chessanalysis.enrich.engine import GameAnalysis
 
@@ -140,13 +140,13 @@ def test_blunders_and_key_moments(sample_analysis):
     assert km and km[0].wp_loss >= km[-1].wp_loss      # sorted worst-first
 
 
-# --- analyse_game cache guard (no real engine needed) -----------------------
+# --- analyse_game store guard (no real engine needed) -----------------------
 
-def test_cache_used_when_top_moves_present(isolated_cache, monkeypatch):
+def test_stored_analysis_used_when_top_moves_present(monkeypatch):
     raw = build_raw(["e2e4", "e7e5"], [10, 8, 12])
     g = FakeGame(game_id="g1")
-    cache.save("engine", f"{g.game_id}_d12", raw)
-    # if the cache is honoured, the engine is never opened
+    store.save_analysis(g.game_id, 12, raw)
+    # if the stored analysis is honoured, the engine is never opened
     monkeypatch.setattr(eng, "find_engine",
                         lambda: pytest.fail("should not open engine"))
     a = eng.analyse_game(g, depth=12)
@@ -154,11 +154,11 @@ def test_cache_used_when_top_moves_present(isolated_cache, monkeypatch):
     assert len(a.top_moves) == 3
 
 
-def test_stale_cache_without_top_moves_recomputes(isolated_cache, monkeypatch):
+def test_analysis_without_top_moves_recomputes(monkeypatch):
     raw = build_raw(["e2e4", "e7e5"], [10, 8, 12])
-    del raw["top_moves"]                       # simulate a pre-multipv cache
+    del raw["top_moves"]                       # a multipv-1 / pre-multipv pass
     g = FakeGame(game_id="g2")
-    cache.save("engine", f"{g.game_id}_d12", raw)
+    store.save_analysis(g.game_id, 12, raw)
 
     class Sentinel(RuntimeError):
         pass
@@ -166,6 +166,6 @@ def test_stale_cache_without_top_moves_recomputes(isolated_cache, monkeypatch):
     def boom():
         raise Sentinel("recomputing")
     monkeypatch.setattr(eng, "find_engine", boom)
-    # stale cache must be bypassed -> it tries to open the engine -> our sentinel
+    # it must be bypassed -> tries to open the engine -> our sentinel
     with pytest.raises(Sentinel):
         eng.analyse_game(g, depth=12)

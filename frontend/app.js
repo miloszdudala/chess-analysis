@@ -5,9 +5,9 @@ const esc = (s) => String(s).replace(/[&<>"]/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const state = { cfg: null, mode: "player", doc: null, category: null };
 const MODE_LABELS = { player: "Player report", game: "Game review",
-  peers: "Peers", brackets: "Brackets", compare: "Compare" };
-// tabs built on the rating corpus — both offer the Expand database button
-const CORPUS_MODES = ["peers", "brackets"];
+  brackets: "Brackets", compare: "Compare" };
+// the rating-corpus tab: same stats at two scopes, plus Expand database
+const CORPUS_MODES = ["brackets"];
 const FORMATS = ["bullet", "blitz", "rapid"];
 
 async function getJSON(url) {
@@ -252,6 +252,55 @@ const WIDGETS = {
                          agg: w.agg || "last", ma: !!w.ma, yMax: w.y_max ?? null,
                          variants: w.variants || null, games: w.games || null });
     return `<div class="chart-host" id="${id}"></div>`;
+  },
+  // a plain numeric line chart (rating band on x). Self-contained SVG: no
+  // zoom toolbar, no date grouping — neither means anything against a band.
+  xyline: (w) => {
+    const CW = 720, CH = 250, P = { l: 46, r: 118, t: 12, b: 32 };
+    const all = w.series.flatMap((s) => s.points || []);
+    if (!all.length) return "";
+    const xs = all.map((p) => p.x), ys = all.map((p) => p.y);
+    let x0 = Math.min(...xs), x1 = Math.max(...xs);
+    let y0 = w.y_zero ? 0 : Math.min(...ys), y1 = Math.max(...ys);
+    if (x1 === x0) { x0 -= 50; x1 += 50; }
+    const pad = (y1 - y0) * 0.18 || 1;
+    if (!w.y_zero) y0 -= pad;
+    y1 += pad;
+    const X = (v) => P.l + ((v - x0) / (x1 - x0)) * (CW - P.l - P.r);
+    const Y = (v) => CH - P.b - ((v - y0) / (y1 - y0)) * (CH - P.t - P.b);
+    const PALETTE = ["#8aa4b8", "#c1573f", "#3f7d5a", "#7d6b9e", "#c9a227"];
+
+    let g = "";
+    for (let i = 0; i <= 4; i++) {
+      const v = y0 + ((y1 - y0) * i) / 4, y = Y(v);
+      g += `<line x1="${P.l}" y1="${y.toFixed(1)}" x2="${CW - P.r}" y2="${y.toFixed(1)}" stroke="var(--line)"/>` +
+           `<text x="${P.l - 8}" y="${(y + 4).toFixed(1)}" text-anchor="end" class="ax">${v.toFixed(1)}</text>`;
+    }
+    for (const v of [...new Set(xs)].sort((a, b) => a - b)) {
+      g += `<text x="${X(v).toFixed(1)}" y="${CH - 10}" text-anchor="middle" class="ax">${v}</text>`;
+    }
+    let body = "", legend = "";
+    w.series.forEach((s, i) => {
+      const col = s.color || PALETTE[i % PALETTE.length];
+      const pts = (s.points || []).slice().sort((a, b) => a.x - b.x);
+      if (pts.length > 1) {
+        body += `<path d="${pts.map((p, j) => `${j ? "L" : "M"}${X(p.x).toFixed(1)},${Y(p.y).toFixed(1)}`).join("")}" ` +
+                `fill="none" stroke="${col}" stroke-width="2"/>`;
+      }
+      for (const p of pts) {
+        body += `<circle cx="${X(p.x).toFixed(1)}" cy="${Y(p.y).toFixed(1)}" r="3.5" fill="${col}">` +
+                `<title>${esc(s.name)} · ${p.x}: ${p.y}</title></circle>`;
+      }
+      legend += `<g transform="translate(${CW - P.r + 8},${P.t + 14 + i * 18})">` +
+                `<rect width="10" height="10" y="-8" rx="2" fill="${col}"/>` +
+                `<text x="15" y="0" class="ax">${esc(s.name)}</text></g>`;
+    });
+    const yl = w.y_label ? `<text transform="rotate(-90)" x="${-CH / 2}" y="12" ` +
+      `text-anchor="middle" class="ax">${esc(w.y_label)}</text>` : "";
+    return `<div class="chart-host"><svg viewBox="0 0 ${CW} ${CH}" width="100%" ` +
+      `preserveAspectRatio="xMidYMid meet" class="xyline">` +
+      `<style>.xyline .ax{font-size:10px;fill:var(--mut)}</style>` +
+      g + body + legend + yl + `</svg></div>`;
   },
   recent: () => {
     const id = "recent-" + Math.random().toString(36).slice(2);
@@ -1328,20 +1377,28 @@ function renderControls() {
       `<button class="go" id="run">Show stats</button>`;
     $("f-fmt").value = "rapid";
   } else if (CORPUS_MODES.includes(state.mode)) {
-    const win = state.mode === "peers"
-      ? field("Rating window", `<select id="f-win">` +
-          [50, 70, 100, 150].map((w) =>
-            `<option value="${w}"${w === 70 ? " selected" : ""}>± ${w}</option>`).join("") +
-          `</select>`)
-      : "";
-    c.innerHTML = win +
+    c.innerHTML =
+      field("Scope", `<select id="f-scope">` +
+        `<option value="ladder">Every band</option>` +
+        `<option value="peers">My band — me vs peers</option></select>`) +
+      field("Rating window", `<select id="f-win">` +
+        [50, 70, 100, 150].map((w) =>
+          `<option value="${w}"${w === 70 ? " selected" : ""}>± ${w}</option>`).join("") +
+        `</select>`) +
       field("Expand by", `<select id="f-n">` +
         [50, 100, 250, 500].map((n) =>
           `<option value="${n}"${n === 100 ? " selected" : ""}>${n} games</option>`).join("") +
         `</select>`) +
-      `<button class="go" id="run">${state.mode === "peers" ? "Compare" : "Show ladder"}</button>` +
+      `<button class="go" id="run">Show</button>` +
       `<button class="sync" id="expand" title="Fetch more games and analyse them, filling the thinnest rating bands first">⊕ Expand database</button>`;
     $("expand").onclick = expandCorpus;
+    // the rating window only means anything against your own band
+    const syncScope = () => {
+      $("f-win").closest(".field").style.display =
+        $("f-scope").value === "peers" ? "" : "none";
+    };
+    $("f-scope").onchange = syncScope;
+    syncScope();
     showCorpusSize();
   } else if (state.mode === "game") {
     c.innerHTML = field("Game", `<select class="wide" id="f-game"><option value="last">Loading…</option></select>` +
@@ -1437,12 +1494,11 @@ async function run() {
     if (state.mode === "player") {
       url = `/api/player?user=${u}&format=${$("f-fmt").value}`;
       busy = "Building report…";
-    } else if (state.mode === "peers") {
-      url = `/api/peers?user=${u}&window=${$("f-win").value}`;
-      busy = "Comparing you with your band…";
     } else if (state.mode === "brackets") {
-      url = `/api/brackets?user=${u}`;
-      busy = "Building the ladder…";
+      const scope = $("f-scope").value;
+      url = `/api/brackets?user=${u}&scope=${scope}&window=${$("f-win").value}`;
+      busy = scope === "peers" ? "Comparing you with your band…"
+                               : "Building the ladder…";
     } else if (state.mode === "game") {
       url = `/api/game?user=${u}&selector=${encodeURIComponent($("f-game").value)}` +
         `&depth=${$("f-depth").value}`;

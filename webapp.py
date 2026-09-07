@@ -552,21 +552,17 @@ def api_corpus_expand():
         return jsonify(_expand_snapshot())
 
 
-@app.get("/api/peers")
-@api
-def api_peers():
-    user = request.args.get("user") or config.get("CHESS_USERNAME")
-    window = request.args.get("window", default=70, type=int)
-    if not user:
-        return jsonify({"error": "No username given."}), 400
-    return jsonify(modes.get("peers")(user, window=window).to_dict())
-
-
 @app.get("/api/brackets")
 @api
 def api_brackets():
+    """One tab, two scopes: `peers` (your band) or `ladder` (every band)."""
     user = request.args.get("user") or config.get("CHESS_USERNAME")
-    return jsonify(modes.get("brackets")(user or "").to_dict())
+    scope = request.args.get("scope", "ladder")
+    window = request.args.get("window", default=70, type=int)
+    if scope == "peers" and not user:
+        return jsonify({"error": "No username given."}), 400
+    return jsonify(modes.get("brackets")(user or "", scope=scope,
+                                         window=window).to_dict())
 
 
 @app.get("/api/compare")

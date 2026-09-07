@@ -48,6 +48,19 @@ def line(series: list[dict], y_label: str = "", x_label: str = "") -> dict:
     return {"type": "line", "series": series, "y_label": y_label, "x_label": x_label}
 
 
+def xyline(series: list[dict], y_label: str = "", x_label: str = "",
+           y_zero: bool = False) -> dict:
+    """A plain numeric line chart: x is a number (a rating band), not a date.
+
+    Distinct from `line`, which is the interactive rating chart and assumes a
+    dated point per game plus Game/Day/Month grouping — meaningless here.
+
+    series: [{"name":.., "color":?, "points":[{"x":n,"y":n}]}]
+    """
+    return {"type": "xyline", "series": series, "y_label": y_label,
+            "x_label": x_label, "y_zero": y_zero}
+
+
 def evalbar(plies: list[dict], moves: list[str], me: str = "") -> dict:
     """Per-ply engine evaluation graph.
 

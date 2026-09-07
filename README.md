@@ -69,16 +69,17 @@ In the browser, pick a tab:
 - **Game review** — pick a game and depth; Stockfish reports accuracy, an eval
   graph, annotated key moments, and the **conversion** stat (when the eval first
   crossed ±X and whether it held).
-- **Peers** — you against the players actually at your rating, in the same
-  currency: their games are analysed with the same engine at the same depth as
-  yours. Accuracy and its percentile, then the phase split — opening,
-  middlegame, endgame — which is where the diagnosis usually lives.
-- **Brackets** — the ladder: every stat, band by band, with accuracy and
-  blunder rate per phase plotted against rating.
+- **Brackets** — the rating corpus, at two scopes. *My band* puts you against
+  the players actually at your rating, measured in the same currency (their
+  games run through the same engine at the same depth as yours); *Every band*
+  is the ladder. Both lead with the opening / middlegame / endgame split, which
+  is where the diagnosis lives — across 1800–2200 the opening barely moves and
+  the endgame is flat, while middlegame blunders per 100 moves halve. Games
+  also get decided later as rating rises: average move 16 at 1800, 19 at 2100,
+  with the share settled in the opening falling from 38% to 23%.
+  **⊕ Expand database** fetches more games and analyses them in the
+  background, filling the thinnest band first.
 - **Compare** — two players side by side.
-
-Both corpus tabs carry **⊕ Expand database**, which fetches more games and
-analyses them in the background, filling the thinnest rating band first.
 
 ### Where the data lives
 

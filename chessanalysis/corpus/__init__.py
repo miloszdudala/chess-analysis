@@ -36,10 +36,22 @@ _AGG = """
   100.0*SUM(s.op_mi)/NULLIF(SUM(s.op_n),0) AS op_mi,
   100.0*SUM(s.mg_mi)/NULLIF(SUM(s.mg_n),0) AS mg_mi,
   100.0*SUM(s.eg_mi)/NULLIF(SUM(s.eg_n),0) AS eg_mi,
+  SUM(s.outcome='win') AS wins, SUM(s.outcome='draw') AS draws,
+  SUM(s.outcome='loss') AS losses,
   100.0*SUM(s.outcome='win')/COUNT(*)  AS winpct,
-  100.0*SUM(s.outcome='draw')/COUNT(*) AS drawpct,
-  100.0*SUM(s.dec_ply IS NOT NULL)/COUNT(*) AS decisive,
-  100.0*SUM(s.dec_held=1)/NULLIF(SUM(s.dec_ply IS NOT NULL),0) AS held
+  100.0*SUM(s.dec_held=1)/NULLIF(SUM(s.dec_ply IS NOT NULL),0) AS held,
+  -- how the game ended, relative to who first got a winning position.
+  -- `dec_side` is the side the eval first crossed +/-2.00 for; comparing it to
+  -- this sample's own colour separates converting from throwing away.
+  SUM(s.outcome='win'  AND s.dec_side=s.color)  AS converted,
+  SUM(s.outcome='loss' AND s.dec_side=s.color)  AS threw,
+  SUM(s.outcome='win'  AND s.dec_side IS NOT NULL AND s.dec_side<>s.color) AS comeback,
+  SUM(s.outcome='loss' AND s.dec_side IS NOT NULL AND s.dec_side<>s.color) AS outplayed,
+  -- when it happened, on the same phase boundaries the accuracy split uses
+  AVG(CASE WHEN s.dec_ply IS NOT NULL THEN (s.dec_ply+1)/2 END) AS dec_move,
+  SUM(s.dec_ply<=24) AS dec_op,
+  SUM(s.dec_ply>24 AND s.dec_ply<=64) AS dec_mg,
+  SUM(s.dec_ply>64) AS dec_eg
 """
 
 

@@ -43,6 +43,7 @@ class CohortContext:
     """
     user: str
     depth: int
+    scope: str = "ladder"   # "peers" | "ladder"
     lo: int = 0                     # peers: the rating window compared against
     hi: int = 0
     band: int | None = None         # peers: the band you sit in

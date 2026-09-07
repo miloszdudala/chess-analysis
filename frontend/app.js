@@ -1458,8 +1458,6 @@ async function loadGames() {
   const user = currentUser();
   if (!user) { setStatus("Type a Chess.com username above.", true); return; }
   try {
-    await syncUser(user);                 // the picker should list today's games
-    setStatus("");
     const games = await getJSON("/api/games?user=" + encodeURIComponent(user));
     // flagged games stay listed (that's the point of flagging rather than
     // deleting) but are marked ⚑ so the history shows what the stats dropped
@@ -1487,9 +1485,6 @@ async function run() {
   const u = encodeURIComponent(user);
   const notes = [];
   try {
-    const synced = await syncUser(user);
-    if (synced.msg) notes.push(synced.msg);
-
     let url, busy;
     if (state.mode === "player") {
       url = `/api/player?user=${u}&format=${$("f-fmt").value}`;
@@ -1506,7 +1501,7 @@ async function run() {
     } else {
       const b = $("f-b").value.trim();
       if (!b) { setStatus("Name a second account to compare with.", true); return; }
-      const other = await syncUser(b);
+      const other = await syncUser(b);   // first time we see this account
       if (!other.ok) notes.push(`${b}: ${other.msg}`);
       url = `/api/compare?a=${u}&b=${encodeURIComponent(b)}`;
       busy = "Comparing…";
@@ -1532,11 +1527,22 @@ function renderTabs() {
   });
 }
 
-// Every report and review pulls new games first, so there is no separate sync
-// step to forget. The backend skips a repeat sync of the same account inside a
-// short window, so clicking around costs nothing. A sync failure is reported
-// but never blocks the report: the games already on disk are enough.
-async function syncUser(user) {
+// An account is synced when the page opens and whenever you switch to a new
+// one — not on every click. Chess.com is the slow part of a report, and
+// pressing Show twice in a row cannot have produced new games. `synced` holds
+// the accounts already pulled this session; reload the page to force a fresh
+// one. A sync failure is reported but never blocks the report: the games
+// already stored are enough.
+const synced = new Set();
+
+async function syncUser(user, force = false) {
+  const key = (user || "").toLowerCase();
+  if (!force && synced.has(key)) return { ok: true, msg: "" };
+  synced.add(key);
+  return sync(user);
+}
+
+async function sync(user) {
   setStatus(`Syncing ${user} from Chess.com…`, false, true);
   try {
     const r = await fetch("/api/scrape?user=" + encodeURIComponent(user), { method: "POST" });
@@ -1629,13 +1635,25 @@ async function startPrewarm() {
   try { state.cfg = await getJSON("/api/config"); }
   catch (e) { setStatus("Backend not reachable: " + e.message, true); return; }
   setUser(rememberedUser() || state.cfg.user || "");
-  renderTabs(); renderControls();
+  renderTabs();
+  // one sync per account per page load, before anything reads the games
+  const first = currentUser();
+  if (first) {
+    const r = await syncUser(first);
+    setStatus(r.msg || "");
+  }
+  renderControls();
   $("prewarm").onclick = startPrewarm;
   // switching account rebuilds everything: the report on screen belongs to the
   // old one, and the game picker and pre-warm estimate are per-account too
-  $("f-user").onchange = () => {
+  $("f-user").onchange = async () => {
     setUser(currentUser());
     state.doc = null;
+    const u = currentUser();
+    if (u) {
+      const r = await syncUser(u);       // a new account has to be pulled once
+      setStatus(r.msg || "");
+    }
     renderControls();
     pollPrewarm();
   };

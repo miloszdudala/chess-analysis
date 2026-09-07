@@ -43,8 +43,10 @@ pkill -f webapp.py                 # stop it
 ```
 
 Type a Chess.com account in the **Username** box in the header and every tab
-reports on it — there is no separate download step, since showing stats or
-opening a review syncs that account's games first. `python3 scraper.py` still
+reports on it — there is no separate download step. An account is synced when
+the page opens and again whenever you switch to one not yet pulled this
+session; pressing **Show** twice cannot have produced new games, so it does not
+re-sync. Reload the page to force a fresh pull. `python3 scraper.py` still
 downloads games from the terminal if you want it.
 
 > **First launch of the Dock app** shows *"Chess Analyzer would like to access
@@ -92,10 +94,10 @@ nor an `os.listdir` per lookup.
 
 ### Syncing, and games that don't count
 
-Reports sync before they run, so the games on screen are always current. That
-stays cheap: past months are recorded in a manifest and never re-fetched, only
-the current month is re-read, and a repeat sync of the same account inside a
-minute is skipped. Games are read from the archive's `/pgn` feed rather than its
+The page syncs on load, so the games on screen are current without a separate
+download step. That stays cheap: past months are recorded in a manifest and
+never re-fetched, only the current month is re-read, and the server skips a
+repeat sync of the same account inside a minute in any case. Games are read from the archive's `/pgn` feed rather than its
 JSON twin — the JSON one is served from a cache that lags an hour behind, so
 games played today are missing from it.
 

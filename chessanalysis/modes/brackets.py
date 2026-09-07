@@ -11,9 +11,35 @@ tables.
 from __future__ import annotations
 
 from . import mode, run_metrics
-from .. import corpus
+from .. import corpus, insights, weaknesses
 from ..contexts import CohortContext
 from ..document import Document
+
+
+# How many cohort games the reused player-report stats run over. They hold a
+# full per-move analysis each, which is the only part of this page that costs
+# real memory, so the cohort is sampled rather than loaded whole.
+REUSE_LIMIT = 400
+
+
+def _no_drilldown(widgets):
+    """Strip the per-game lists out of reused widgets.
+
+    The player report lets you click a reason and open the games behind it.
+    Here a reason covers hundreds of strangers' games, so the list is noise —
+    and the rows carry ids that belong to no account on this page.
+    """
+    out = []
+    for w in widgets:
+        if w.get("type") == "reasons":
+            w = {**w, "groups": [{**g, "games": []} for g in w["groups"]]}
+        elif w.get("type") == "drilltable":
+            w = {**w, "rows": [{**r, "games": []} for r in w["rows"]]}
+        elif w.get("type") == "text":
+            w = {**w, "body": w["body"].replace(
+                " Click any reason to see the games behind it.", "")}
+        out.append(w)
+    return out
 
 
 @mode("brackets")
@@ -54,4 +80,22 @@ def brackets(username: str = "", scope: str = "ladder", window: int = 70,
     doc = Document(mode="brackets", title=title, subtitle=sub,
                    meta={"scope": scope, "depth": depth, **t})
     run_metrics("brackets", ctx, doc)
+
+    if scope == "peers":
+        # The player report's own analysis, run over the band instead of over
+        # you. Same functions, same thresholds — so "why they lose" is directly
+        # comparable with the "why you lose" on your Player report tab.
+        ps = corpus.pairs(ctx.lo, ctx.hi, depth, limit=REUSE_LIMIT)
+        cp = int(__import__("chessanalysis").config.get("DECISIVE_CP", "200"))
+        # `weaknesses.report` is unpacked rather than called whole: its
+        # phase-parity section compares a player with their opponents, and here
+        # both sides are drawn from the same band, so it reads a flat +/-0.3
+        # by construction. The rest transfer intact.
+        for sec in (insights.outcome_reasons(ps, cp)
+                    + weaknesses.blunder_anatomy(ps)
+                    + weaknesses.think_time(ps)
+                    + weaknesses.opening_leaks(ps)
+                    + insights.advanced_report(ps)):
+            doc.add(f"{sec['title']} — your band",
+                    _no_drilldown(sec["widgets"]), category="Your band")
     return doc

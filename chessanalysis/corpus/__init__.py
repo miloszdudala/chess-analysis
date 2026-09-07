@@ -116,6 +116,92 @@ def coverage(depth: int = DEPTH) -> list[dict]:
     return [{"band": r[0], "samples": r[1]} for r in rows]
 
 
+def colour_split(depth: int = DEPTH) -> list[dict]:
+    """White / draw / black, per band and overall — counted once per GAME.
+
+    Everything else here counts samples (both sides), which would make this
+    particular question meaningless: every white win is also a black loss.
+    """
+    rows = store.connect().execute(
+        "SELECT band, SUM(result='1-0'), SUM(result='1/2-1/2'), SUM(result='0-1'), "
+        "COUNT(*) FROM games WHERE source='corpus' AND band IS NOT NULL "
+        "GROUP BY band ORDER BY band").fetchall()
+    return [{"band": r[0], "white": r[1], "draw": r[2], "black": r[3], "games": r[4]}
+            for r in rows]
+
+
+def _rehydrate(raw: dict, pgn_text: str) -> dict | None:
+    """Fill in whatever a stored analysis is missing, from the PGN alone.
+
+    Analyses banked by the earliest corpus pass hold only the eval array. SAN,
+    UCI and FENs are all recoverable by replaying the moves — no engine — which
+    is the point of keeping the PGN beside the evals. Only `best_uci` is truly
+    engine-only, so `best_san` comes back empty and the move-by-move commentary
+    loses its "better was ..." clause; every number is unaffected.
+    """
+    import io
+
+    import chess
+    import chess.pgn
+
+    if raw.get("moves_san") and raw.get("fens"):
+        return raw
+    game = chess.pgn.read_game(io.StringIO(pgn_text))
+    if game is None:
+        return None
+    board = game.board()
+    san, uci, fens = [], [], []
+    for mv in game.mainline_moves():
+        fens.append(board.fen())
+        san.append(board.san(mv))
+        uci.append(mv.uci())
+        board.push(mv)
+    fens.append(board.fen())
+    if len(raw["evals"]) != len(san) + 1:
+        return None                       # evals and moves disagree — skip it
+    return {**raw, "moves_san": san, "moves_uci": uci, "fens": fens,
+            "best_uci": raw.get("best_uci") or [""] * len(san),
+            "top_moves": raw.get("top_moves") or []}
+
+
+def pairs(lo: int, hi: int, depth: int = DEPTH, limit: int = 400):
+    """(Game, GameAnalysis) for corpus games, bound to the in-range player.
+
+    This is what lets the player-report machinery — `diagnosis.diagnose`,
+    `insights`, `weaknesses` — run over the corpus unchanged: they take exactly
+    this shape. Nothing is recomputed, because the corpus pass stored the full
+    raw engine output, so a GameAnalysis is rebuilt by `_derive` off the disk.
+    Sampled at random and capped, since these are per-move analyses and holding
+    every one of them at once is the only part of this that costs real memory.
+    """
+    from ..enrich import engine as eng
+    from ..model import bind, parse_pgn_text
+
+    rows = store.connect().execute(
+        "SELECT g.gid, g.pgn, g.white, g.black, g.welo, g.belo FROM games g "
+        "JOIN analysis a ON a.gid=g.gid AND a.depth=? WHERE g.source='corpus' "
+        "AND (g.welo BETWEEN ? AND ? OR g.belo BETWEEN ? AND ?) "
+        "ORDER BY RANDOM() LIMIT ?", (depth, lo, hi, lo, hi, limit)).fetchall()
+    out = []
+    for r in rows:
+        raw = store.load_analysis(r["gid"], depth)
+        if not raw or not raw.get("evals"):
+            continue
+        pgn_text = store.unpack_pgn(r["pgn"])
+        raw = _rehydrate(raw, pgn_text)
+        if raw is None:
+            continue
+        parsed = parse_pgn_text(pgn_text)
+        if not parsed:
+            continue
+        who = r["white"] if (r["welo"] is not None and lo <= r["welo"] <= hi) else r["black"]
+        g = bind(parsed[0], who)
+        if g is None:
+            continue
+        out.append((g, eng._derive(raw, depth, "corpus")))
+    return out
+
+
 def totals(depth: int = DEPTH) -> dict:
     c = store.connect()
     return {

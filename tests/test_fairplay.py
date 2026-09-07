@@ -1,0 +1,89 @@
+"""Detecting opponents Chess.com has closed for fair-play violations."""
+from __future__ import annotations
+
+import time
+
+import pytest
+
+from chessanalysis import cache, fairplay
+
+
+class FakeGame:
+    def __init__(self, gid, opponent):
+        self.game_id = gid
+        self.opponent = opponent
+
+
+@pytest.fixture
+def offline(isolated_cache, monkeypatch):
+    """Isolated cache plus a recorded, scripted profile API."""
+    calls = []
+
+    def fake_fetch(username):
+        calls.append(username)
+        return {"cheat": fairplay.BANNED, "ghost": None}.get(username, "basic")
+
+    monkeypatch.setattr(fairplay, "_fetch_status", fake_fetch)
+    monkeypatch.setattr(time, "sleep", lambda s: None)
+    return calls
+
+
+def test_refresh_reports_who_is_banned(offline):
+    res = fairplay.refresh(["cheat", "honest"])
+    assert res["banned"] == ["cheat"]
+    assert res["checked"] == 2
+    assert fairplay.is_banned("cheat")
+    assert not fairplay.is_banned("honest")
+
+
+def test_lookups_are_cached_so_a_resync_costs_nothing(offline):
+    fairplay.refresh(["cheat", "honest"])
+    offline.clear()
+    fairplay.refresh(["cheat", "honest"])
+    assert offline == []
+
+
+def test_a_clean_status_is_rechecked_once_it_goes_stale(offline):
+    fairplay.refresh(["honest"])
+    stale = time.time() - (fairplay.TTL_DAYS + 1) * 86400
+    cache.save("fairplay", "honest", {"status": "basic", "checked": stale})
+    offline.clear()
+    fairplay.refresh(["honest"])
+    assert offline == ["honest"]
+
+
+def test_a_ban_is_permanent_and_never_rechecked(offline):
+    fairplay.refresh(["cheat"])
+    cache.save("fairplay", "cheat", {"status": fairplay.BANNED, "checked": 0})
+    offline.clear()
+    fairplay.refresh(["cheat"])
+    assert offline == []
+
+
+def test_an_unreadable_profile_is_not_cached(offline):
+    fairplay.refresh(["ghost"])
+    assert fairplay.status("ghost") is None
+    offline.clear()
+    fairplay.refresh(["ghost"])
+    assert offline == ["ghost"]        # tried again rather than cached as clean
+
+
+def test_usernames_are_matched_case_insensitively(offline):
+    fairplay.refresh(["Cheat"])
+    assert fairplay.is_banned("CHEAT") and fairplay.is_banned("cheat")
+
+
+def test_cheated_ids_and_flags_pick_out_the_right_games(offline):
+    fairplay.refresh(["cheat", "honest"])
+    games = [FakeGame("g1", "honest"), FakeGame("g2", "cheat")]
+    assert fairplay.cheated_ids(games) == {"g2"}
+    flags = fairplay.flags(games)
+    assert set(flags) == {"g2"}
+    assert flags["g2"]["flag"] == fairplay.FLAG
+    assert "cheat" in flags["g2"]["note"]
+
+
+def test_nothing_is_flagged_before_any_lookup(isolated_cache):
+    games = [FakeGame("g1", "cheat")]
+    assert fairplay.cheated_ids(games) == set()
+    assert fairplay.flags(games) == {}

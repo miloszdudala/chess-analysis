@@ -19,6 +19,20 @@ async function postJSON(url) {
   if (!r.ok || d.error) throw new Error(d.error || `HTTP ${r.status}`);
   return d;
 }
+// The account every tab reports on. It lives in the app bar rather than in one
+// mode's controls, so switching player is a single edit that all tabs follow;
+// it is remembered across visits and falls back to CHESS_USERNAME from .env.
+const USER_KEY = "chess-analyzer:user";
+const currentUser = () => ($("f-user").value || "").trim();
+
+function setUser(name) {
+  $("f-user").value = name || "";
+  try { localStorage.setItem(USER_KEY, name || ""); } catch (e) { /* private mode */ }
+}
+function rememberedUser() {
+  try { return localStorage.getItem(USER_KEY) || ""; } catch (e) { return ""; }
+}
+
 function setStatus(msg, isErr = false, busy = false) {
   const s = $("status");
   s.className = "status" + (isErr ? " err" : "");
@@ -92,12 +106,26 @@ const WIDGETS = {
       `<option value="${esc(o.key)}"${o.key === w.primary ? " selected" : ""}>${esc(o.label)}</option>`).join("");
     const manual = w.manual ? `<span class="vd-manual">manually set</span>` : "";
     const sub = w.sub ? `<div class="vd-sub">${esc(w.sub)}</div>` : "";
-    return `<div class="verdict" data-game-id="${esc(w.game_id)}">` +
+    // one checkbox: an anomalous game (disconnect, thrown, not serious) stays
+    // in the history but drops out of every statistic
+    const flag = `<label class="vd-flag" title="Excluded from every statistic; ` +
+      `still listed in the history.">` +
+      `<input type="checkbox" class="vd-anom"${w.anomalous ? " checked" : ""}>` +
+      `anomalous — don't count</label>`;
+    // an opponent banned for cheating excludes the game on its own, and any
+    // rating it cost has been added back — say so rather than leaving the
+    // game quietly missing from the stats
+    const cheat = w.cheated
+      ? `<div class="vd-cheat">⚑ Not counted: ${esc(w.cheated)}. ` +
+        `Any rating this game cost you has been added back.</div>`
+      : "";
+    return `<div class="verdict${w.anomalous || w.cheated ? " vd-anomalous" : ""}" data-game-id="${esc(w.game_id)}">` +
+      cheat +
       `<div class="vd-top">` +
         `<div class="vd-main"><div class="vd-label">${esc(w.label)}</div>` +
         `<div class="vd-headline">${esc(w.headline)}</div>${sub}</div>` +
         `<label class="vd-pick">reason${manual}` +
-        `<select class="vd-select">${opts}</select></label>` +
+        `<select class="vd-select">${opts}</select>${flag}</label>` +
       `</div><p class="text vd-detail">${esc(w.detail)}</p></div>`;
   },
 
@@ -449,6 +477,10 @@ function buildEvalChart(host, plies, moves, me) {
   const colorAt = (i) => (i % 2 === 1 ? "white" : "black");
   const showDot = (p, i) => DOT[p.label] && i > 0 &&
     (filter === "both" || (colorAt(i) === me) === (filter === "mine"));
+  // ply i's flag is drawn one step back, on the eval the mover was looking at:
+  // a red dot sits at the top of the cliff, not at the bottom.
+  const flagAt = (i) => (plies[i + 1] && showDot(plies[i + 1], i + 1)
+    ? plies[i + 1].label : null);
 
   const bar = document.createElement("div"); bar.className = "chart-toolbar";
   [["Both", "both"], ["Mine", "mine"], ["Opponent", "theirs"]].forEach(([lbl, val]) => {
@@ -481,10 +513,13 @@ function buildEvalChart(host, plies, moves, me) {
 
   const curve = plies.map((p, i) => `${xPix(i).toFixed(1)},${yPix(p.cp).toFixed(1)}`);
   const base = (M.t + ph).toFixed(1);
-  const dotStr = () => plies.map((p, i) => showDot(p, i)
-    ? `<circle class="ev-dot" cx="${xPix(i).toFixed(1)}" cy="${yPix(p.cp).toFixed(1)}" ` +
-      `r="5.5" fill="${DOT[p.label]}"/>`
-    : "").join("");
+  const dotStr = () => plies.map((p, i) => {
+    const lab = flagAt(i);
+    return lab
+      ? `<circle class="ev-dot" cx="${xPix(i).toFixed(1)}" cy="${yPix(p.cp).toFixed(1)}" ` +
+        `r="5.5" fill="${DOT[lab]}"/>`
+      : "";
+  }).join("");
 
   // y-axis: eval in pawns; x-axis: move numbers
   let axes = "";
@@ -523,7 +558,9 @@ function buildEvalChart(host, plies, moves, me) {
     const san = i > 0 && moves[i - 1] ? moves[i - 1] : "start";
     const ev = (p.cp / 100).toFixed(1);
     const evTxt = p.cp > 0 ? "+" + ev : ev;
-    const lab = p.label && p.label !== "ok" ? ` · <span style="color:${DOT[p.label]}">${p.label}</span>` : "";
+    // the flag names the move played *from* here, matching the dot drawn here
+    const fl = flagAt(i);
+    const lab = fl ? ` · <span style="color:${DOT[fl]}">${fl}</span> next: ${esc(moves[i])}` : "";
     tip.innerHTML = `${moveNo ? moveNo + "." : ""} ${esc(san)} · <b>${evTxt}</b>${lab}`;
     tip.style.left = (x * (r.width / W)) + "px";
     tip.style.top = (yPix(p.cp) * (r.height / H)) + "px";
@@ -540,7 +577,8 @@ function buildEvalChart(host, plies, moves, me) {
     window.dispatchEvent(new CustomEvent("rv-goto", { detail: i }));
   };
   const hint = document.createElement("div"); hint.className = "chart-hint";
-  hint.textContent = "click a point to jump the board to that move";
+  hint.textContent = "dots mark the position a flagged move was played from · " +
+    "click a point to jump the board there";
   host.appendChild(hint);
 }
 
@@ -988,16 +1026,26 @@ function buildReviewBoard(host, data) {
 // ------------------------------------------------------------- recent games
 
 function initRecent(host) {
-  let n = 10;
+  let n = 10, showFlagged = false;
   const bar = document.createElement("div"); bar.className = "chart-toolbar";
   const body = document.createElement("div");
+  const btns = [];
   [["5", 5], ["10", 10], ["20", 20], ["All", 0]].forEach(([lbl, val]) => {
     const b = document.createElement("button");
     b.className = "gbtn" + (val === n ? " on" : "");
     b.textContent = lbl;
-    b.onclick = () => { n = val; [...bar.children].forEach((c) => c.classList.toggle("on", c === b)); load(); };
-    bar.appendChild(b);
+    b.onclick = () => { n = val; btns.forEach((c) => c.classList.toggle("on", c === b)); load(); };
+    btns.push(b); bar.appendChild(b);
   });
+  // anomalous games are out of the stats, so this table is the only route back
+  // to one from the report — the checkbox lists them, marked, without counting
+  const flagLbl = document.createElement("label");
+  flagLbl.className = "tb-check";
+  flagLbl.innerHTML = `<input type="checkbox"> show anomalous ⚑`;
+  flagLbl.querySelector("input").onchange = (e) => {
+    showFlagged = e.target.checked; load();
+  };
+  bar.appendChild(flagLbl);
   host.appendChild(bar); host.appendChild(body);
 
   async function load() {
@@ -1005,8 +1053,9 @@ function initRecent(host) {
     try {
       const meta = state.doc.meta;
       const d = await getJSON(`/api/recent?user=${encodeURIComponent(meta.player)}` +
-        `&format=${meta.format || ""}&n=${n}`);
+        `&format=${meta.format || ""}&n=${n}${showFlagged ? "&flagged=1" : ""}`);
       renderRecent(body, d);
+      flagLbl.classList.toggle("tb-hidden", !d.flagged && !showFlagged);
     } catch (e) {
       body.innerHTML = `<p class="text" style="color:var(--loss)">${esc(e.message)}</p>`;
     }
@@ -1028,12 +1077,25 @@ function renderRecent(body, d) {
       const tick = g.decisive.held ? "✓ held" : "✗ lost";
       conv = `move ${g.decisive.move} <span class="${cls}">${tick}</span>`;
     }
-    return `<tr class="rrow" data-id="${g.id}">` +
-      `<td class="${resCls}">${res}</td><td>${esc(g.date)}</td>` +
+    const dt = g.depth ? ` title="engine depth ${g.depth}"` : "";
+    const mark = g.flag
+      ? `<span class="rr-flag" title="Anomalous${g.note ? ": " + esc(g.note) : ""}` +
+        ` — not counted in any statistic">⚑</span>`
+      : "";
+    return `<tr class="rrow${g.flag ? " rr-flagged" : ""}" data-id="${g.id}">` +
+      `<td class="${resCls}">${mark}${res}</td><td>${esc(g.date)}</td>` +
       `<td>${esc(g.opponent)} (${g.opp_elo || "?"})</td><td>${g.result}</td>` +
-      `<td>${acc}</td><td>${g.blunders}</td><td>${conv}</td></tr>`;
+      `<td${dt}>${acc}</td><td${dt}>${g.blunders}</td><td>${conv}</td></tr>`;
   }).join("");
-  body.innerHTML = `<table class="recent-tbl"><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table>`;
+  // reviewed games are read back at review depth, so a batch can mix depths;
+  // accuracy and blunder counts shift with depth, so say so rather than let
+  // the difference read as a change in play
+  const depths = [...new Set(d.games.map((g) => g.depth).filter(Boolean))].sort();
+  const note = depths.length > 1
+    ? `<p class="chart-hint">analysed at mixed engine depths (${depths.map((x) => "d" + x).join(", ")}) — ` +
+      `deeper searches find more errors, so accuracy isn't directly comparable across rows</p>`
+    : "";
+  body.innerHTML = `<table class="recent-tbl"><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table>${note}`;
   body.querySelectorAll(".rrow").forEach((tr) => { tr.onclick = () => gotoGame(tr.dataset.id); });
 }
 
@@ -1077,7 +1139,8 @@ async function gotoGame(id, ply = null) {
   state.mode = "game"; renderTabs(); renderControls();
   setStatus("Running Stockfish… first analysis can take a few seconds.", false, true);
   try {
-    state.doc = await getJSON(`/api/game?selector=${encodeURIComponent(id)}&depth=${state.cfg.depth}`);
+    state.doc = await getJSON(`/api/game?user=${encodeURIComponent(currentUser())}` +
+      `&selector=${encodeURIComponent(id)}&depth=${state.cfg.depth}`);
     state.category = null; $("chips").innerHTML = "";
     renderSections(); setStatus("");
     // drilled in from a specific move? position the board there (it scrolls
@@ -1253,58 +1316,85 @@ function renderChips() {
 function field(label, inner) { return `<div class="field"><label>${label}</label>${inner}</div>`; }
 
 function renderControls() {
-  const c = $("controls"), user = state.cfg.user || "";
+  const c = $("controls");
   $("chips").innerHTML = ""; $("result").innerHTML = ""; setStatus("");
   if (state.mode === "player") {
     const opts = FORMATS.map((f) =>
       `<option value="${f}">${f[0].toUpperCase() + f.slice(1)}</option>`).join("");
-    c.innerHTML = field("Username", `<input id="f-user" value="${esc(user)}">`) +
-      field("Format", `<select id="f-fmt">${opts}</select>`) +
+    c.innerHTML = field("Format", `<select id="f-fmt">${opts}</select>`) +
       `<button class="go" id="run">Show stats</button>`;
     $("f-fmt").value = "rapid";
   } else if (state.mode === "game") {
-    c.innerHTML = field("Game", `<select class="wide" id="f-game"><option value="last">Loading…</option></select>`) +
+    c.innerHTML = field("Game", `<select class="wide" id="f-game"><option value="last">Loading…</option></select>` +
+        `<span class="gf-count" id="f-game-flagged"></span>`) +
       field("Engine depth", `<input id="f-depth" type="number" min="6" max="22" value="${state.cfg.depth}">`) +
-      `<button class="go" id="run">Analyze</button>`;
+      `<button class="go" id="run">Review game</button>`;
     loadGames();
   } else {
-    c.innerHTML = field("Player A", `<input id="f-a" value="${esc(user)}">`) +
-      field("Player B", `<input id="f-b" placeholder="opponent">`) +
+    c.innerHTML = field("Compare with", `<input id="f-b" placeholder="another account">`) +
       `<button class="go" id="run">Compare</button>`;
   }
   $("run").onclick = run;
 }
 
 async function loadGames() {
+  const user = currentUser();
+  if (!user) { setStatus("Type a Chess.com username above.", true); return; }
   try {
-    const games = await getJSON("/api/games?user=" + encodeURIComponent(state.cfg.user || ""));
+    await syncUser(user);                 // the picker should list today's games
+    setStatus("");
+    const games = await getJSON("/api/games?user=" + encodeURIComponent(user));
+    // flagged games stay listed (that's the point of flagging rather than
+    // deleting) but are marked ⚑ so the history shows what the stats dropped
+    const flagged = games.filter((g) => g.flag);
     $("f-game").innerHTML = [`<option value="last">⭐ Most recent</option>`].concat(
       games.map((g) => {
         const m = g.outcome === "win" ? "✓" : g.outcome === "loss" ? "✗" : "=";
-        return `<option value="${g.id}">${m} ${g.date} · ${esc(g.white)} vs ${esc(g.black)} (${g.result}) · ${g.time_class}</option>`;
+        const fl = g.flag ? `⚑ ` : "";
+        const why = g.flag ? ` — not counted${g.note ? ": " + esc(g.note) : ""}` : "";
+        return `<option value="${g.id}">${fl}${m} ${g.date} · ${esc(g.white)} vs ${esc(g.black)} (${g.result}) · ${g.time_class}${why}</option>`;
       })).join("");
+    const lbl = $("f-game-flagged");
+    if (lbl) {
+      lbl.textContent = flagged.length
+        ? `⚑ ${flagged.length} game${flagged.length > 1 ? "s" : ""} excluded from stats`
+        : "";
+    }
   } catch (e) { setStatus("Could not load games: " + e.message, true); }
 }
 
 async function run() {
+  const user = currentUser();
+  if (!user) { setStatus("Type a Chess.com username above.", true); return; }
   $("run").disabled = true;
-  let url, busy;
-  if (state.mode === "player") {
-    url = `/api/player?user=${encodeURIComponent($("f-user").value.trim())}&format=${$("f-fmt").value}`;
-    busy = "Building report…";
-  } else if (state.mode === "game") {
-    url = `/api/game?selector=${encodeURIComponent($("f-game").value)}&depth=${$("f-depth").value}`;
-    busy = "Running Stockfish… first analysis can take a few seconds.";
-  } else {
-    url = `/api/compare?a=${encodeURIComponent($("f-a").value.trim())}&b=${encodeURIComponent($("f-b").value.trim())}`;
-    busy = "Comparing…";
-  }
-  setStatus(busy, false, true);
+  const u = encodeURIComponent(user);
+  const notes = [];
   try {
+    const synced = await syncUser(user);
+    if (synced.msg) notes.push(synced.msg);
+
+    let url, busy;
+    if (state.mode === "player") {
+      url = `/api/player?user=${u}&format=${$("f-fmt").value}`;
+      busy = "Building report…";
+    } else if (state.mode === "game") {
+      url = `/api/game?user=${u}&selector=${encodeURIComponent($("f-game").value)}` +
+        `&depth=${$("f-depth").value}`;
+      busy = "Running Stockfish… first analysis can take a few seconds.";
+    } else {
+      const b = $("f-b").value.trim();
+      if (!b) { setStatus("Name a second account to compare with.", true); return; }
+      const other = await syncUser(b);
+      if (!other.ok) notes.push(`${b}: ${other.msg}`);
+      url = `/api/compare?a=${u}&b=${encodeURIComponent(b)}`;
+      busy = "Comparing…";
+    }
+    setStatus(busy, false, true);
     state.doc = await getJSON(url);
     state.category = null;
     if (state.mode === "player") renderChips(); else $("chips").innerHTML = "";
-    renderSections(); setStatus("");
+    renderSections();
+    setStatus(notes.join(" · "));
     window.scrollTo({ top: 0, behavior: "smooth" });
   } catch (e) { setStatus(e.message, true); }
   finally { $("run").disabled = false; }
@@ -1320,21 +1410,25 @@ function renderTabs() {
   });
 }
 
-async function syncGames() {
-  const btn = $("sync");
-  btn.disabled = true;
-  setStatus("Syncing from Chess.com…", false, true);
+// Every report and review pulls new games first, so there is no separate sync
+// step to forget. The backend skips a repeat sync of the same account inside a
+// short window, so clicking around costs nothing. A sync failure is reported
+// but never blocks the report: the games already on disk are enough.
+async function syncUser(user) {
+  setStatus(`Syncing ${user} from Chess.com…`, false, true);
   try {
-    const r = await fetch("/api/scrape?user=" + encodeURIComponent(state.cfg.user || ""),
-      { method: "POST" });
+    const r = await fetch("/api/scrape?user=" + encodeURIComponent(user), { method: "POST" });
     const d = await r.json();
     if (!r.ok || d.error) throw new Error(d.error || `HTTP ${r.status}`);
-    const skip = d.skipped ? `, ${d.skipped} months already up to date` : "";
-    setStatus(`Synced: ${d.new} new game${d.new === 1 ? "" : "s"}${skip}.`);
+    let msg = d.fresh ? "" : `${d.new} new game${d.new === 1 ? "" : "s"}`;
+    if (d.banned && d.banned.length) {
+      msg += `${msg ? ", " : ""}${d.banned.length} opponent` +
+        `${d.banned.length === 1 ? "" : "s"} banned for fair play (those games ` +
+        `are excluded and their rating loss added back)`;
+    }
+    return { ok: true, msg };
   } catch (e) {
-    setStatus("Sync failed: " + e.message, true);
-  } finally {
-    btn.disabled = false;
+    return { ok: false, msg: "sync failed: " + e.message };
   }
 }
 
@@ -1379,7 +1473,7 @@ function renderPrewarm(s) {
 
 let _pwTimer = null;
 async function prewarmFetch(method) {
-  const r = await fetch("/api/prewarm?user=" + encodeURIComponent(state.cfg.user || ""),
+  const r = await fetch("/api/prewarm?user=" + encodeURIComponent(currentUser()),
     { method });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return r.json();                     // an `error` field here is job status, not fatal
@@ -1412,9 +1506,17 @@ async function startPrewarm() {
 (async function init() {
   try { state.cfg = await getJSON("/api/config"); }
   catch (e) { setStatus("Backend not reachable: " + e.message, true); return; }
+  setUser(rememberedUser() || state.cfg.user || "");
   renderTabs(); renderControls();
-  $("sync").onclick = syncGames;
   $("prewarm").onclick = startPrewarm;
+  // switching account rebuilds everything: the report on screen belongs to the
+  // old one, and the game picker and pre-warm estimate are per-account too
+  $("f-user").onchange = () => {
+    setUser(currentUser());
+    state.doc = null;
+    renderControls();
+    pollPrewarm();
+  };
   pollPrewarm();                       // show the estimate, or resume a running job
   // drill-down: a game row (reasons or drill-table) opens its review, at its
   // move if one is attached; a drill-table parent row toggles its games.
@@ -1457,6 +1559,27 @@ async function startPrewarm() {
       setStatus("Could not save reason: " + err.message, true);
     } finally {
       sel.disabled = false;
+    }
+  });
+  // the anomalous checkbox: drops the game from every statistic (it stays in
+  // the history, marked ⚑, so the record still shows it)
+  document.addEventListener("change", async (e) => {
+    const box = e.target.closest(".verdict .vd-anom");
+    if (!box) return;
+    const card = box.closest(".verdict"), gid = card.dataset.gameId;
+    const on = box.checked;
+    box.disabled = true;
+    try {
+      await postJSON(`/api/flag?game=${encodeURIComponent(gid)}&flag=${on ? "anomaly" : ""}`);
+      card.classList.toggle("vd-anomalous", on);
+      setStatus(on ? "Flagged anomalous — rerun a report to see the stats without it."
+                   : "Unflagged — it counts again.");
+      loadGames();                    // the picker's ⚑ marks follow along
+    } catch (err) {
+      box.checked = !on;
+      setStatus("Could not save flag: " + err.message, true);
+    } finally {
+      box.disabled = false;
     }
   });
 })();

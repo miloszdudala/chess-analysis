@@ -49,7 +49,8 @@ class Game:
     user: str = ""
     color: str = ""          # "white" | "black"
     outcome: str = ""        # "win" | "loss" | "draw"
-    user_elo: int | None = None
+    user_elo: int | None = None      # rebased: see ratings.apply
+    user_elo_raw: int | None = None  # exactly as Chess.com recorded it
     opp_elo: int | None = None
     opponent: str = ""
 
@@ -227,13 +228,28 @@ def bind(game: Game, user: str) -> Game | None:
     elo_tag = "WhiteElo" if game.color == "white" else "BlackElo"
     opp_elo_tag = "BlackElo" if game.color == "white" else "WhiteElo"
     game.user_elo = int(game.h(elo_tag)) if game.h(elo_tag).isdigit() else None
+    game.user_elo_raw = game.user_elo
     game.opp_elo = int(game.h(opp_elo_tag)) if game.h(opp_elo_tag).isdigit() else None
     game.opponent = black if game.color == "white" else white
     return game
 
 
-def load_games(folder: str, user: str) -> list[Game]:
-    """Load all PGNs in `folder`, bound to `user`, sorted chronologically."""
+def load_games(folder: str, user: str, include_flagged: bool = False) -> list[Game]:
+    """Load all PGNs in `folder`, bound to `user`, sorted chronologically.
+
+    Two kinds of game are left out unless `include_flagged`: those the player
+    flagged as unrepresentative (see `overrides`), and those played against an
+    account Chess.com has since closed for cheating (see `fairplay`). Every
+    statistic goes through here, so excluding a game drops it from all of them
+    at once. Views that show the record rather than measure it (the history
+    list, a game's own review) pass True.
+
+    Ratings are rebased first, over the *whole* history — a cheated game's
+    refund is only readable with every sample present, and the correction has
+    to be in place before anything downstream reads `user_elo`.
+    """
+    from . import fairplay, overrides, ratings
+
     games: list[Game] = []
     seen: set[str] = set()
     for path in glob.glob(os.path.join(folder, "*.pgn")):
@@ -246,4 +262,10 @@ def load_games(folder: str, user: str) -> list[Game]:
             seen.add(bound.game_id)
             games.append(bound)
     games.sort(key=lambda g: g.sort_key)
-    return games
+
+    cheated = fairplay.cheated_ids(games)
+    ratings.apply(games, cheated)
+    if include_flagged:
+        return games
+    skip = overrides.flagged_ids() | cheated
+    return [g for g in games if str(g.game_id) not in skip]

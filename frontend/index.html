@@ -20,9 +20,16 @@
   .sync { background: var(--panel); border: 1px solid var(--line);
     color: var(--ink); border-radius: 8px; padding: .4rem .85rem; cursor: pointer;
     font: inherit; font-size: .85rem; }
-  .sync:first-of-type { margin-left: auto; }
   .sync:hover { border-color: var(--accent); color: var(--accent); }
   .sync:disabled { opacity: .55; cursor: default; }
+  /* the account every tab reports on — global, so switching player is one edit */
+  .userbox { margin-left: auto; display: flex; align-items: center; gap: .45rem; }
+  .userbox span { font-size: .68rem; text-transform: uppercase; letter-spacing: .08em;
+    color: var(--mut); }
+  .userbox input { background: var(--panel); color: var(--ink); font: inherit;
+    font-size: .85rem; border: 1px solid var(--line); border-radius: 8px;
+    padding: .35rem .6rem; width: 10.5rem; }
+  .userbox input:focus { outline: none; border-color: var(--accent); }
   .prewarm { max-width: 960px; margin: .3rem auto 0; font-size: .82rem; color: var(--mut);
     display: none; align-items: center; gap: .6rem; }
   .prewarm.on { display: flex; }
@@ -65,8 +72,11 @@
   <div class="appbar">
     <span class="brand">♟ Chess Analyzer</span>
     <div class="tabs" id="tabs"></div>
+    <label class="userbox" title="Any Chess.com account — its games are synced automatically">
+      <span>Username</span>
+      <input id="f-user" placeholder="chess.com account" autocomplete="off" spellcheck="false">
+    </label>
     <button class="sync" id="prewarm" title="Analyze every game at review depth in the background so Game Review opens instantly">⚡ Prepare reviews</button>
-    <button class="sync" id="sync" title="Download new games from Chess.com">⟳ Sync games</button>
   </div>
 </header>
 

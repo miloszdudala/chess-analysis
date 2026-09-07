@@ -53,6 +53,29 @@ def test_game_length_buckets():
     assert rows["Long (> 40 moves)"]["loss"] == 1
 
 
+# --- opponent strength ------------------------------------------------------
+
+def test_opponent_strength_uses_pre_game_ratings():
+    """Chess.com Elo headers are post-game; the gap must be reconstructed.
+
+    Game 2: you (2000 pre) beat a 2050-pre opponent. Post-game the headers say
+    you 2008 vs them 2042 — a +34 'Similar' gap — but the real pre-game gap
+    was +50, the 'Stronger' bucket.
+    """
+    from chessanalysis.metrics.player.opponents import by_opponent_strength
+
+    class G:
+        def __init__(self, outcome, user_elo, opp_elo):
+            self.outcome, self.user_elo, self.opp_elo = outcome, user_elo, opp_elo
+
+    games = [G("win", 2000, 1900),          # baseline: sets your pre for game 2
+             G("win", 2008, 2042)]          # post ratings after a win (Δ = +8)
+    table = by_opponent_strength(_ctx(games))
+    rows = {r[0]: r for r in table["rows"]}
+    assert "Stronger (+50…+150)" in rows            # pre-game gap +50
+    assert rows["Stronger (+50…+150)"][2] == 1      # ...with the win counted there
+
+
 # --- opening repertoire -----------------------------------------------------
 
 def test_opening_family_keeps_two_word_root():

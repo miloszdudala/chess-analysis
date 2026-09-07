@@ -12,26 +12,51 @@ python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt        # python-chess, flask
 brew install stockfish                            # engine for game review
 
-cp .env.example .env                              # then set CHESS_USERNAME
+cp .env.example .env                              # optional: a default username
 ```
 
 `.env` (gitignored) holds `CHESS_USERNAME`, `GAMES_DIR`, `REPORT_FILE`,
-`STOCKFISH_PATH`, `ENGINE_DEPTH`.
+`STOCKFISH_PATH`, `ENGINE_DEPTH`. `CHESS_USERNAME` only pre-fills the web app's
+username box — type any account there to analyse it.
 
 ## Run the web app
 
+**One click — no terminal.** Launch **Chess Analyzer** from the Dock,
+Launchpad or Spotlight (the app lives in `~/Applications`; drag it to the Dock
+once to keep it there). It restarts the server and opens the browser for you,
+so code edits are always picked up. `Chess Analyzer.command` in this folder
+does the same thing from Finder.
+
+Both are thin wrappers around one script:
+
 ```bash
-# 1. Download your games (public Chess.com API, no key needed)
-python3 scraper.py
-
-# 2. Start the app, then open http://127.0.0.1:5050
-.venv/bin/python webapp.py
-
-# Stop the app: press Ctrl+C in its terminal, or from another terminal:
-pkill -f webapp.py
+bin/chess-analyzer            # start (restarting any old server) and open the browser
+bin/chess-analyzer --stop     # stop the server
+PORT=8080 bin/chess-analyzer  # a different port
 ```
 
-Run it on a different port with `PORT=8080 .venv/bin/python webapp.py`.
+Server output goes to `data/webapp.log`. Or run it the long way:
+
+```bash
+.venv/bin/python webapp.py         # then open http://127.0.0.1:5050
+pkill -f webapp.py                 # stop it
+```
+
+Type a Chess.com account in the **Username** box in the header and every tab
+reports on it — there is no separate download step, since showing stats or
+opening a review syncs that account's games first. `python3 scraper.py` still
+downloads games from the terminal if you want it.
+
+> **First launch of the Dock app** shows *"Chess Analyzer would like to access
+> files in your Documents folder"* — click **Allow**. macOS blocks apps from
+> reading `~/Documents` until you do, and this project lives there. If you miss
+> the prompt, macOS won't ask twice: reset it with
+> `tccutil reset SystemPolicyDocumentsFolder local.chessanalyzer.launcher` and
+> launch again, or tick **Chess Analyzer** under System Settings → Privacy &
+> Security → Files and Folders. The `.command` file needs no permission — it
+> runs through Terminal, which already has access.
+>
+> The app bundle is a launcher only; rebuild it with `bin/make-app`.
 
 In the browser, pick a tab:
 
@@ -46,9 +71,27 @@ In the browser, pick a tab:
   crossed ±X and whether it held).
 - **Compare** — two players side by side.
 
-The Chess.com API is only ever called by `scraper.py`. Past months are recorded
-in a manifest and skipped on later runs — only the current month is re-checked —
-so games are effectively downloaded once.
+### Syncing, and games that don't count
+
+Reports sync before they run, so the games on screen are always current. That
+stays cheap: past months are recorded in a manifest and never re-fetched, only
+the current month is re-read, and a repeat sync of the same account inside a
+minute is skipped. Games are read from the archive's `/pgn` feed rather than its
+JSON twin — the JSON one is served from a cache that lags an hour behind, so
+games played today are missing from it.
+
+Two kinds of game are left out of every statistic while staying visible in the
+history, marked ⚑:
+
+- **Anomalous** — a disconnect, a game thrown on purpose. You tick this yourself
+  in the game's review.
+- **Opponent banned for fair play** — detected automatically. Chess.com
+  publishes an account's standing, so opponents are checked on sync and games
+  against a closed account are dropped. Chess.com refunds the rating such a game
+  cost you, but days later, which leaves a dip and then a jump in the rating
+  curve; `ratings.py` adds the points back over exactly that stretch so the
+  curve is continuous. A win or draw against someone later banned keeps its
+  gain, so it gets no correction.
 
 ## CLI (static HTML + JSON)
 
@@ -74,6 +117,8 @@ frontend/                  index.html + app.js: mode picker, JS widget renderer,
                            interactive rating chart
 chessanalysis/
 ├── model.py               PGN → perspective-bound Game objects (+ parsed moves, clocks)
+├── fairplay.py            opponents Chess.com closed for cheating (cached lookups)
+├── ratings.py             rebases the rating curve around a refunded cheated game
 ├── contexts.py            per-mode input shapes (Player / Game / Compare)
 ├── enrich/engine.py       Stockfish per-move evals, accuracy, blunder detection (cached)
 ├── registry.py            @metric decorator; metrics tagged by scope

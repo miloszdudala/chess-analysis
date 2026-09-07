@@ -26,7 +26,7 @@ def _select(games, selector):
 @mode("game")
 def game_review(username: str, games_dir: str = "games",
                 selector=None, depth=None) -> Document:
-    games = load_games(games_dir, username)
+    games = load_games(games_dir, username, include_flagged=True)
     if not games:
         raise SystemExit(f"No games for '{username}' in '{games_dir}/'.")
     game = _select(games, selector)

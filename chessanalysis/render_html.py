@@ -114,11 +114,14 @@ def _eval(w) -> str:
     line_pts = " ".join(f"{x:.2f},{y:.2f}" for x, y in curve)
     # white-territory polygon: under the curve down to the bottom edge
     area = (f"0,100 " + " ".join(f"{x:.2f},{y:.2f}" for x, y in curve) + " 100,100")
+    # a flag is drawn one ply back, on the eval the mover was looking at, so a
+    # red dot sits at the top of the cliff rather than at the bottom of it
     dots = "".join(
-        f'<circle cx="{xy(i, p["cp"])[0]:.2f}" cy="{xy(i, p["cp"])[1]:.2f}" r="1.6" '
+        f'<circle cx="{xy(i - 1, plies[i - 1]["cp"])[0]:.2f}" '
+        f'cy="{xy(i - 1, plies[i - 1]["cp"])[1]:.2f}" r="1.6" '
         f'class="m-{p.get("label","ok")}"/>'
         for i, p in enumerate(plies)
-        if p.get("label") in ("blunder", "mistake", "inaccuracy"))
+        if i > 0 and p.get("label") in ("blunder", "mistake", "inaccuracy"))
     return (f'<svg viewBox="0 0 100 100" preserveAspectRatio="none" class="evalg">'
             f'<rect width="100" height="100" class="ev-black"/>'
             f'<polygon points="{area}" class="ev-white"/>'
@@ -187,6 +190,8 @@ def _verdict(w) -> str:
     # static export: the reason dropdown is interactive (web app only); show the
     # current verdict as a card + sentence.
     manual = ' <span class="vd-manual">manually set</span>' if w.get("manual") else ""
+    if w.get("anomalous"):
+        manual += ' <span class="vd-manual">⚑ anomalous — not counted</span>'
     sub = f'<div class="vd-sub">{esc(w["sub"])}</div>' if w.get("sub") else ""
     return (f'<div class="verdict"><div class="vd-label">{esc(w["label"])}{manual}</div>'
             f'<div class="vd-headline">{esc(w["headline"])}</div>{sub}'
@@ -337,10 +342,18 @@ _CSS = """
   .chart-dot { fill:var(--panel); stroke:var(--accent); stroke-width:2; }
   .chart-brush { fill:var(--accent); opacity:.12; }
   .chart-hint { color:var(--mut); font-size:.7rem; text-align:right; padding:.1rem .5rem .2rem; }
-  .chart-toolbar { display:flex; gap:.35rem; margin-bottom:.5rem; }
+  .chart-toolbar { display:flex; gap:.35rem; margin-bottom:.5rem; align-items:center;
+          flex-wrap:wrap; }
   .gbtn { background:var(--panel); border:1px solid var(--line); color:var(--mut);
           border-radius:7px; padding:.2rem .65rem; font:inherit; font-size:.78rem; cursor:pointer; }
   .gbtn.on { background:var(--accent); border-color:var(--accent); color:#fff; }
+  /* toolbar checkbox (e.g. "show anomalous") + the rows it reveals */
+  .tb-check { display:flex; align-items:center; gap:.3rem; margin-left:.5rem;
+          color:var(--mut); font-size:.78rem; cursor:pointer; }
+  .tb-check input { accent-color:var(--accent); margin:0; }
+  .tb-check.tb-hidden { display:none; }
+  tr.rr-flagged td { opacity:.55; }
+  .rr-flag { color:var(--accent); margin-right:.3rem; }
   /* opening move tree */
   .tree { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:.5rem .6rem; }
   .tree details > summary, .tree .leaf { display:flex; align-items:center; gap:.55rem;
@@ -400,6 +413,18 @@ _CSS = """
                font-weight:600; letter-spacing:normal; text-transform:none; }
   .vd-detail { margin:.5rem 0 .4rem; }
   .reason-games tr.rrow td:first-child { padding-left:1.4rem; }
+  /* "anomalous" checkbox: the game stays in the history, leaves the stats */
+  .vd-flag { display:flex; align-items:center; gap:.35rem; margin-top:.4rem;
+             text-transform:none; letter-spacing:normal; font-size:.75rem;
+             cursor:pointer; }
+  .vd-flag input { accent-color:var(--accent); margin:0; }
+  .vd-cheat { margin:0 0 .7rem; padding:.5rem .7rem; border-radius:8px;
+    background:rgba(193,87,63,.09); border:1px solid var(--loss);
+    color:var(--ink); font-size:.85rem; }
+  .verdict.vd-anomalous { border-color:var(--accent); }
+  .verdict.vd-anomalous .vd-headline { text-decoration:line-through;
+             text-decoration-color:var(--mut); }
+  .gf-count { display:block; color:var(--accent); font-size:.72rem; margin-top:.25rem; }
   /* drill-down table: rows expand to the games behind them (web app) */
   table.drilltable th:first-child, table.drilltable td.dt-caret { width:1.2rem;
                    padding-right:0; }

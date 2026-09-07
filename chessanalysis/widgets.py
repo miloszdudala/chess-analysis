@@ -141,17 +141,21 @@ def review(positions: list[dict], moves: list[dict], orientation: str,
 
 
 def verdict(game_id, label, headline, sub, detail, outcome, primary,
-            options, manual=False) -> dict:
+            options, manual=False, anomalous=False, cheated=None) -> dict:
     """The game's win/loss verdict with a manual reason override (web app).
 
     options: [{"key":.., "label":..}] — the reasons selectable for this outcome.
     `primary` is the current reason key; `manual` flags a user override. The UI
-    renders a dropdown that POSTs /api/verdict to change the flag.
+    renders a dropdown that POSTs /api/verdict to change the flag, plus an
+    `anomalous` checkbox (POSTs /api/flag) that drops the game from the stats.
+    `cheated` is set when the opponent has since been banned for fair play: the
+    game is already excluded automatically, so the UI says so instead of
+    leaving the exclusion unexplained.
     """
     return {"type": "verdict", "game_id": game_id, "label": label,
             "headline": headline, "sub": sub, "detail": detail,
             "outcome": outcome, "primary": primary, "options": options,
-            "manual": manual}
+            "manual": manual, "anomalous": anomalous, "cheated": cheated}
 
 
 def ranking(title: str, rows: list[dict]) -> dict:

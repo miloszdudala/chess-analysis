@@ -8,8 +8,10 @@ Uses the Chess.com public API (no key required):
     https://www.chess.com/news/view/published-data-api
 """
 import argparse
+import calendar
 import json
 import os
+import re
 import sys
 import time
 import urllib.error
@@ -19,13 +21,39 @@ from chessanalysis import cache, config
 
 API = "https://api.chess.com/pub"
 # Chess.com blocks requests without a real-looking User-Agent.
-HEADERS = {"User-Agent": "personal game storage"}
+HEADERS = {"User-Agent": "Personal storage"}
 
 
 def get_json(url):
     req = urllib.request.Request(url, headers=HEADERS)
     with urllib.request.urlopen(req, timeout=30) as resp:
         return json.load(resp)
+
+
+def get_text(url):
+    req = urllib.request.Request(url, headers=HEADERS)
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        return resp.read().decode("utf-8", "replace")
+
+
+def split_pgns(text):
+    """Split a monthly PGN feed into one PGN string per game."""
+    return [g.strip() for g in re.split(r'(?m)^(?=\[Event ")', text) if g.strip()]
+
+
+def tag(pgn, name, default=""):
+    """Value of a PGN header tag, or `default` if it is missing."""
+    m = re.search(r'\[%s "([^"]*)"\]' % name, pgn)
+    return m.group(1) if m else default
+
+
+def end_time(pgn):
+    """Unix timestamp from the UTC EndDate/EndTime tags (0 if unparseable)."""
+    stamp = f"{tag(pgn, 'EndDate')} {tag(pgn, 'EndTime')}"
+    try:
+        return calendar.timegm(time.strptime(stamp, "%Y.%m.%d %H:%M:%S"))
+    except ValueError:
+        return 0
 
 
 def list_archives(username):
@@ -35,27 +63,30 @@ def list_archives(username):
 
 
 def download_month(archive_url, out_dir, username):
-    """Download one month's games, one PGN file per game. Returns count saved."""
-    data = get_json(archive_url)
-    games = data.get("games", [])
+    """Download one month's games, one PGN file per game. Returns count saved.
+
+    Reads the archive's `/pgn` feed rather than its JSON twin. The JSON one is
+    served from a cache that routinely lags an hour behind (its `Age` runs far
+    past the `max-age=5` it advertises), so today's games are simply absent
+    from it; the PGN feed is rebuilt on request. Both carry the same games, and
+    filenames and file contents here are unchanged, so games fetched by earlier
+    versions are still recognised and never re-downloaded.
+    """
+    text = get_text(archive_url.rstrip("/") + "/pgn")
+    # archive_url ends with /YYYY/MM
+    year, month = archive_url.rstrip("/").split("/")[-2:]
     saved = 0
-    for g in games:
-        pgn = g.get("pgn")
-        if not pgn:
-            continue
-        # archive_url ends with /YYYY/MM
-        year, month = archive_url.rstrip("/").split("/")[-2:]
-        white = g.get("white", {}).get("username", "white")
-        black = g.get("black", {}).get("username", "black")
-        end = g.get("end_time", 0)
-        name = f"{year}.{month}_{white}_vs_{black}_{end}.pgn"
+    for pgn in split_pgns(text):
+        white = tag(pgn, "White", "white")
+        black = tag(pgn, "Black", "black")
+        name = f"{year}.{month}_{white}_vs_{black}_{end_time(pgn)}.pgn"
         # sanitize
         name = "".join(c if c.isalnum() or c in "._-" else "_" for c in name)
         path = os.path.join(out_dir, name)
         if os.path.exists(path):
             continue
         with open(path, "w", encoding="utf-8") as f:
-            f.write(pgn)
+            f.write(pgn + "\n")
         saved += 1
     return saved
 

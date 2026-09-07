@@ -9,6 +9,7 @@ report*.json
 out/
 data/cache/
 data/overrides.json
+data/webapp.log
 
 # Python
 __pycache__/

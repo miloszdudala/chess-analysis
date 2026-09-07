@@ -1,7 +1,12 @@
 """Opponent-strength stats (aggregate, within the chosen format).
 
-Per-game rating change is approximated from consecutive ratings in the
-chronological (single-format) game list: Δ for game i = elo_i − elo_{i-1}.
+Chess.com PGN headers carry POST-game ratings, so both the per-game rating
+change and the strength gap are reconstructed from the chronological
+(single-format) game list: your pre-game rating for game i is your post-game
+rating from game i-1 (Δ = elo_i − elo_{i-1}), and the opponent's pre-game
+rating is approximated by handing back the mirrored exchange (opp_post + Δ).
+Classifying by the post-game gap would skew the buckets: winning makes the
+opponent look ~2Δ weaker than they actually were, losing ~2Δ stronger.
 """
 from ...registry import metric
 from ... import widgets as W
@@ -27,11 +32,16 @@ def by_opponent_strength(ctx):
     prev = None
     for g in ctx.games:
         delta = (g.user_elo - prev) if (g.user_elo is not None and prev is not None) else None
+        user_pre = prev
         if g.user_elo is not None:
             prev = g.user_elo
         if not (g.user_elo and g.opp_elo):
             continue
-        gap = g.opp_elo - g.user_elo
+        if delta is not None:
+            # pre-game gap: (opp_post + Δ) − user_pre  (see module docstring)
+            gap = (g.opp_elo + delta) - user_pre
+        else:
+            gap = g.opp_elo - g.user_elo    # first game: post-only fallback
         for label, test in BUCKETS:
             if test(gap):
                 bucket = agg[label]

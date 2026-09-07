@@ -67,7 +67,9 @@ def _prewarm_worker(user, depth):
     from chessanalysis.enrich import engine as eng
 
     try:
-        games = load_games(GAMES_DIR, user)
+        # flagged games included: they leave the stats but stay reviewable, and
+        # Game Review should open them just as fast
+        games = load_games(GAMES_DIR, user, include_flagged=True)
         todo, already = [], 0
         for g in games:
             c = cache.load("engine", _prewarm_key(g, depth))
@@ -150,16 +152,39 @@ def api_config():
     })
 
 
+# Every report and review syncs first, so the same user can be re-synced several
+# times a minute by ordinary clicking. Chess.com is fine with that volume, but
+# there is nothing to gain from it either: a sync inside this window is skipped.
+SYNC_MIN_INTERVAL = 60
+_LAST_SYNC: dict[str, float] = {}
+
+
+def _sync(user, force=False):
+    """Download new games, then re-check opponents for fair-play bans."""
+    import scraper
+    from chessanalysis import fairplay
+
+    age = time.time() - _LAST_SYNC.get(user.lower(), 0)
+    if not force and age < SYNC_MIN_INTERVAL:
+        return {"user": user, "new": 0, "skipped": 0, "requests": 0,
+                "fresh": True, "banned": []}
+    res = scraper.scrape(user, GAMES_DIR)   # hits the Chess.com API
+    games = load_games(GAMES_DIR, user, include_flagged=True)
+    res["banned"] = fairplay.refresh([g.opponent for g in games])["banned"]
+    _LAST_SYNC[user.lower()] = time.time()
+    res["user"] = user
+    res["fresh"] = False
+    return res
+
+
 @app.post("/api/scrape")
 @api
 def api_scrape():
-    import scraper
     user = request.args.get("user") or config.get("CHESS_USERNAME")
     if not user:
-        return jsonify({"error": "No username. Set CHESS_USERNAME in .env."}), 400
-    res = scraper.scrape(user, GAMES_DIR)   # hits the Chess.com API (user-triggered)
-    res["user"] = user
-    return jsonify(res)
+        return jsonify({"error": "No username given."}), 400
+    force = request.args.get("force") in ("1", "true", "yes")
+    return jsonify(_sync(user, force))
 
 
 @app.get("/api/prewarm")
@@ -175,7 +200,7 @@ def api_prewarm_status():
 
     user = request.args.get("user") or config.get("CHESS_USERNAME")
     depth = int(config.get("ENGINE_DEPTH", "15"))
-    games = load_games(GAMES_DIR, user)
+    games = load_games(GAMES_DIR, user, include_flagged=True)   # all reviewable
     already = sum(1 for g in games if cache.exists("engine", _prewarm_key(g, depth)))
     todo = len(games) - already
     return jsonify({
@@ -210,12 +235,18 @@ def api_prewarm_start():
 @app.get("/api/games")
 @api
 def api_games():
+    """The full history — flagged games included, marked as such, so the record
+    stays visible even though the statistics no longer count it."""
+    from chessanalysis import fairplay, overrides
+
     user = request.args.get("user") or config.get("CHESS_USERNAME")
-    games = load_games(GAMES_DIR, user)
+    games = load_games(GAMES_DIR, user, include_flagged=True)
+    flags = {**overrides.flags(), **fairplay.flags(games)}
     return jsonify([{
         "id": g.game_id, "white": g.h("White"), "black": g.h("Black"),
         "result": g.result, "date": g.date, "opponent": g.opponent,
         "color": g.color, "outcome": g.outcome, "time_class": g.time_class,
+        **(flags.get(str(g.game_id)) or {}),
     } for g in reversed(games)])
 
 
@@ -225,7 +256,7 @@ def api_player():
     user = request.args.get("user") or config.get("CHESS_USERNAME")
     fmt = request.args.get("format") or None
     if not user:
-        return jsonify({"error": "No username. Set CHESS_USERNAME in .env."}), 400
+        return jsonify({"error": "No username given."}), 400
     doc = modes.get("player")(user, games_dir=GAMES_DIR, time_class=fmt)
     return jsonify(doc.to_dict())   # JSON widgets -> rendered client-side
 
@@ -233,7 +264,10 @@ def api_player():
 @app.get("/api/recent")
 @api
 def api_recent():
+    """The recent-games table. `flagged=1` also lists anomalous games (marked,
+    so they read as excluded) — the only way back to one from the report."""
     import chess.engine
+    from chessanalysis import fairplay, overrides
     from chessanalysis.enrich import engine as eng
 
     user = request.args.get("user") or config.get("CHESS_USERNAME")
@@ -241,10 +275,18 @@ def api_recent():
     n = request.args.get("n", default=10, type=int)
     cp = int(config.get("DECISIVE_CP", "200"))
     depth = int(config.get("RECENT_DEPTH", "12"))
+    show_flagged = request.args.get("flagged") in ("1", "true", "yes")
 
-    games = load_games(GAMES_DIR, user)
+    games = load_games(GAMES_DIR, user, include_flagged=True)
+    flags = {**overrides.flags(), **fairplay.flags(games)}
     if fmt:
         games = [g for g in games if g.time_class == fmt]
+    # count only this player's flagged games: overrides are keyed by game id and
+    # outlive a change of account, so a global count would advertise excluded
+    # games that aren't even in this player's history.
+    flagged_here = sum(1 for g in games if str(g.game_id) in flags)
+    if not show_flagged:
+        games = [g for g in games if str(g.game_id) not in flags]
     games = list(reversed(games))            # most recent first
     if n and n > 0:
         games = games[:n]
@@ -254,26 +296,32 @@ def api_recent():
         for g in games:
             if proc is None:                  # open one engine for the whole batch
                 proc = chess.engine.SimpleEngine.popen_uci(eng.find_engine())
-            a = eng.analyse_game(g, depth=depth, engine=proc)
+            a = eng.analyse_game(g, depth=eng.deepest_cached(g, depth), engine=proc)
             d = a.decisive(cp)
             rows.append({
                 "id": g.game_id, "date": g.date, "color": g.color,
                 "opponent": g.opponent, "opp_elo": g.opp_elo,
                 "result": g.result, "outcome": g.outcome,
+                "depth": a.depth,
                 "accuracy": a.accuracy.get(g.color),
                 "blunders": len(a.blunders(g.color)),
                 "decisive": (None if not d["reached"] else
                              {"move": d["move_no"], "held": d["held"], "side": d["side"]}),
+                **(flags.get(str(g.game_id)) or {}),
             })
     finally:
         if proc:
             proc.quit()
-    return jsonify({"threshold": cp, "games": rows})
+    return jsonify({"threshold": cp, "games": rows, "flagged": flagged_here})
 
 
 def _analysed_pairs(user, fmt, n, depth):
     """(Game, GameAnalysis) for the chosen format — cached engine analyses;
-    an engine is opened only if some game isn't in the cache yet."""
+    an engine is opened only if some game isn't in the cache yet.
+
+    `depth` is a floor, not a target: a game already analysed deeper (by Game
+    Review or the pre-warm) is read back at that depth rather than analysed
+    again. Depth can therefore vary game to game within one batch."""
     import chess.engine
     from chessanalysis import cache
     from chessanalysis.enrich import engine as eng
@@ -287,9 +335,10 @@ def _analysed_pairs(user, fmt, n, depth):
     proc, pairs = None, []
     try:
         for g in games:
-            if cache.load("engine", f"{g.game_id}_d{depth}") is None and proc is None:
+            d = eng.deepest_cached(g, depth)
+            if cache.load("engine", f"{g.game_id}_d{d}") is None and proc is None:
                 proc = chess.engine.SimpleEngine.popen_uci(eng.find_engine())
-            pairs.append((g, eng.analyse_game(g, depth=depth, engine=proc)))
+            pairs.append((g, eng.analyse_game(g, depth=d, engine=proc)))
     finally:
         if proc:
             proc.quit()
@@ -321,7 +370,7 @@ def api_conversion():
 @app.get("/api/game")
 @api
 def api_game():
-    user = config.get("CHESS_USERNAME")
+    user = request.args.get("user") or config.get("CHESS_USERNAME")
     selector = request.args.get("selector", "last")
     depth = request.args.get("depth", type=int)
     doc = modes.get("game")(user, games_dir=GAMES_DIR, selector=selector, depth=depth)
@@ -343,6 +392,24 @@ def api_set_verdict():
         return jsonify({"error": f"unknown reason '{reason}'"}), 400
     overrides.set_reason(gid, reason)
     return jsonify({"ok": True, "game": gid, "reason": reason})
+
+
+@app.post("/api/flag")
+@api
+def api_set_flag():
+    """Flag (or unflag) a game as not representative — a disconnect, a thrown
+    game. Flagged games leave every statistic but stay in the history."""
+    from chessanalysis import overrides
+
+    gid = request.args.get("game")
+    flag = request.args.get("flag") or None
+    note = request.args.get("note") or None
+    if not gid:
+        return jsonify({"error": "game id required"}), 400
+    if flag is not None and flag not in overrides.FLAGS:
+        return jsonify({"error": f"unknown flag '{flag}'"}), 400
+    overrides.set_flag(gid, flag, note)
+    return jsonify({"ok": True, "game": gid, "flag": flag, "note": note})
 
 
 @app.get("/api/analyse")

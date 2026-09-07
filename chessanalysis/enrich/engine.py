@@ -302,6 +302,29 @@ def _derive(raw: dict, depth: int, engine_name: str) -> GameAnalysis:
                         counts=counts, fens=fens, top_moves=top_moves)
 
 
+def deepest_cached(game, minimum: int) -> int:
+    """The deepest usable cached depth for a game, or `minimum` if nothing
+    deeper is on disk. Lets the stats pages reuse a review-depth analysis
+    instead of re-running the engine at their own shallower depth.
+
+    Only caches that `analyse_game` would actually honour count — a stale
+    entry without `top_moves` would trigger a recompute at that deeper (i.e.
+    slower) depth, which defeats the point.
+    """
+    best = minimum
+    for key in cache.keys("engine", f"{game.game_id}_d"):
+        try:
+            d = int(key.rsplit("_d", 1)[1])
+        except (IndexError, ValueError):
+            continue
+        if d <= best:
+            continue
+        c = cache.load("engine", key)
+        if c and c.get("evals") and c.get("top_moves"):
+            best = d
+    return best
+
+
 def analyse_game(game, depth: int | None = None, engine=None) -> GameAnalysis:
     """Analyse one Game. Uses the disk cache; opens an engine if not given."""
     if depth is None:

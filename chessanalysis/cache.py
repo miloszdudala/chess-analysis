@@ -16,6 +16,15 @@ def exists(namespace: str, key: str) -> bool:
     return os.path.exists(_path(namespace, key))
 
 
+def keys(namespace: str, prefix: str = "") -> list[str]:
+    """Keys stored in a namespace, optionally filtered by prefix."""
+    d = os.path.join(CACHE_DIR, namespace)
+    if not os.path.isdir(d):
+        return []
+    return [f[:-5] for f in os.listdir(d)
+            if f.endswith(".json") and f.startswith(prefix)]
+
+
 def load(namespace: str, key: str) -> dict | None:
     path = _path(namespace, key)
     if os.path.exists(path):

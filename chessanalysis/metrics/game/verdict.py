@@ -8,6 +8,7 @@ aggregate "why you win & lose" view. Needs ctx.analysis (engine output).
 """
 from ... import config
 from ... import diagnosis as dx
+from ... import fairplay
 from ... import overrides
 from ... import widgets as W
 from ...registry import metric
@@ -40,5 +41,10 @@ def verdict(ctx):
 
     options = [{"key": k, "label": v}
                for k, v in _REASON_TABLES[dg.outcome].items()]
+    opp = getattr(ctx.game, "opponent", "")
+    cheated = (f"{opp} has since been closed by Chess.com for fair-play "
+               f"violations") if opp and fairplay.is_banned(opp) else None
     return W.verdict(gid, f"Why you {verb}", headline, sub, detail,
-                     dg.outcome, primary, options, manual)
+                     dg.outcome, primary, options, manual,
+                     anomalous=overrides.get_flag(gid) is not None,
+                     cheated=cheated)

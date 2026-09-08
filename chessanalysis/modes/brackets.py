@@ -75,7 +75,11 @@ def brackets(username: str = "", scope: str = "ladder", window: int = 70,
 
     if scope == "peers":
         from ..model import load_games
+        from ..corpus import analyse as corpus_analyse
 
+        # games played since the last visit have no corpus-depth analysis yet,
+        # and would otherwise be silently missing from every number below
+        corpus_analyse.analyse_own(username, depth)
         ctx.me = corpus.mine(username, depth)
         if not ctx.me:
             raise SystemExit(f"No analysed games for '{username}' yet.")

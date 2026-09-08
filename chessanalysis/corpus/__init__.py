@@ -57,6 +57,29 @@ _AGG = """
 """
 
 
+def excluded_ids(user: str) -> list[str]:
+    """Your games that every other statistic drops: flagged, or against an
+    account Chess.com has since closed for cheating.
+
+    `load_games` applies this for anything that goes through it. The aggregates
+    here read `samples` directly for speed, so they have to apply it too — or
+    the Peers tab counts games the Player report does not.
+    """
+    from .. import fairplay, overrides
+    from ..model import load_games
+
+    games = load_games(user, include_flagged=True)
+    return sorted(overrides.flagged_ids() | fairplay.cheated_ids(games))
+
+
+def _skip_clause(user: str, alias: str = "s"):
+    """(sql fragment, params) excluding those games. Usually a handful."""
+    bad = excluded_ids(user)
+    if not bad:
+        return "", []
+    return f" AND {alias}.gid NOT IN ({','.join('?' * len(bad))})", bad
+
+
 def _one(sql, args):
     row = store.connect().execute(sql, args).fetchone()
     return dict(row) if row and row["n"] else None
@@ -72,10 +95,11 @@ def cohort(lo: int, hi: int, depth: int = DEPTH) -> dict | None:
 def mine(user: str, depth: int = DEPTH) -> dict | None:
     """The same aggregate over the games `user` actually played."""
     u = user.lower()
+    skip, args = _skip_clause(user)
     return _one(f"SELECT {_AGG} FROM samples s JOIN games g ON g.gid=s.gid "
                 "WHERE s.depth=? AND ((s.color='white' AND g.white=?) "
-                "                  OR (s.color='black' AND g.black=?))",
-                (depth, u, u))
+                "                  OR (s.color='black' AND g.black=?))" + skip,
+                (depth, u, u, *args))
 
 
 def ladder(depth: int = DEPTH, min_samples: int = 30) -> list[dict]:
@@ -108,11 +132,12 @@ def accuracy_values(lo: int, hi: int, depth: int = DEPTH) -> list[float]:
 
 def my_accuracy_values(user: str, depth: int = DEPTH) -> list[float]:
     u = user.lower()
+    skip, args = _skip_clause(user)
     return [r[0] for r in store.connect().execute(
         "SELECT s.acc FROM samples s JOIN games g ON g.gid=s.gid "
         "WHERE s.depth=? AND s.acc IS NOT NULL "
-        "AND ((s.color='white' AND g.white=?) OR (s.color='black' AND g.black=?))",
-        (depth, u, u))]
+        "AND ((s.color='white' AND g.white=?) OR (s.color='black' AND g.black=?))"
+        + skip, (depth, u, u, *args))]
 
 
 def quantiles(values: list[float], qs=(10, 25, 50, 75, 90)) -> dict:
@@ -154,6 +179,20 @@ def player_percentile(value: float, lo: int, hi: int, depth: int = DEPTH,
     if len(avgs) < 20:
         return None
     return round(100 * sum(a < value for a in avgs) / len(avgs)), len(avgs)
+
+
+def pending_own(user: str, depth: int = DEPTH) -> list:
+    """Your games with no analysis at the corpus depth.
+
+    New games are analysed at *review* depth by the pre-warm, which the Peers
+    tab cannot use — mixing depths would bias every comparison on it. Until
+    they are analysed here too they are simply absent from these statistics,
+    which is worse than slow, so the tab tops them up itself.
+    """
+    from ..model import load_games
+
+    return [g for g in load_games(user)
+            if not store.has_analysis(g.game_id, depth)]
 
 
 def my_pairs(user: str, depth: int = DEPTH):

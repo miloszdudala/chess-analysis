@@ -171,6 +171,42 @@ def shard(i: int, n: int, depth: int = DEPTH) -> None:
         proc.close()
 
 
+def analyse_own(user: str, depth: int = DEPTH, limit: int = 25) -> int:
+    """Analyse your own not-yet-covered games, in this process.
+
+    Only ever a handful — the games played since you last opened the tab — so
+    one engine and no sharding. Capped so a first run on a long history cannot
+    hang a page load; the rest are picked up by the next Expand.
+    """
+    from .. import corpus
+
+    todo = corpus.pending_own(user, depth)[:limit]
+    if not todo:
+        return 0
+    proc = chess.engine.SimpleEngine.popen_uci(eng.find_engine())
+    proc.configure({"Hash": 16, "Threads": 1})
+    conn = store.connect()
+    done = 0
+    try:
+        for g in todo:
+            raw = analyse_pgn(g.pgn, proc, depth)
+            if raw is None:
+                continue
+            store.save_analysis(g.game_id, depth, raw, multipv=MULTIPV,
+                                engine="sf", secs=raw["secs"])
+            welo, belo = g.h("WhiteElo"), g.h("BlackElo")
+            if welo.isdigit() and belo.isdigit():
+                for row in sample_rows(g.game_id, raw, int(welo), int(belo),
+                                       g.result, depth):
+                    conn.execute(f"INSERT OR REPLACE INTO samples({SAMPLE_COLS}) "
+                                 f"VALUES({','.join('?' * 34)})", row)
+            done += 1
+        conn.commit()
+    finally:
+        proc.close()
+    return done
+
+
 def run(workers: int = 3, depth: int = DEPTH) -> int:
     """Analyse everything outstanding across `workers` shards. Returns the count."""
     n = pending(depth)

@@ -98,6 +98,31 @@ def accuracy_histogram(lo: int, hi: int, depth: int = DEPTH,
     return [(r[0], r[1]) for r in rows]
 
 
+def accuracy_values(lo: int, hi: int, depth: int = DEPTH) -> list[float]:
+    """Every cohort game's own accuracy — the distribution, not its average."""
+    return [r[0] for r in store.connect().execute(
+        "SELECT s.acc FROM samples s JOIN games g ON g.gid=s.gid "
+        "WHERE g.source='corpus' AND s.depth=? AND s.elo BETWEEN ? AND ? "
+        "AND s.acc IS NOT NULL", (depth, lo, hi))]
+
+
+def my_accuracy_values(user: str, depth: int = DEPTH) -> list[float]:
+    u = user.lower()
+    return [r[0] for r in store.connect().execute(
+        "SELECT s.acc FROM samples s JOIN games g ON g.gid=s.gid "
+        "WHERE s.depth=? AND s.acc IS NOT NULL "
+        "AND ((s.color='white' AND g.white=?) OR (s.color='black' AND g.black=?))",
+        (depth, u, u))]
+
+
+def quantiles(values: list[float], qs=(10, 25, 50, 75, 90)) -> dict:
+    """Percentile points of a sample, by nearest rank."""
+    if not values:
+        return {}
+    xs = sorted(values)
+    return {q: xs[min(len(xs) - 1, max(0, round(q / 100 * len(xs)) - 1))] for q in qs}
+
+
 def percentile(value: float, lo: int, hi: int, depth: int = DEPTH) -> int | None:
     """Where `value` falls in the cohort's per-game accuracy distribution."""
     if value is None:

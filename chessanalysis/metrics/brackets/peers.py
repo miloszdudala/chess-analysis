@@ -19,18 +19,28 @@ def _gap(a, b, digits=1, lower_is_better=False):
 def headline(ctx):
     if not _peers(ctx):
         return None
-    me, co, pc = ctx.me, ctx.cohort, ctx.percentile
-    return W.cards([
+    me, co = ctx.me, ctx.cohort
+    n, cn = me["moves"] or 0, co["moves"] or 0
+    cards = [
         W.card(f"{me['acc']:.1f}", "Your accuracy",
                f"peers {co['acc']:.1f} · {_gap(me['acc'], co['acc'])}"),
-        W.card(f"{pc}th" if pc is not None else "—", "Percentile in your band",
-               f"of {int(co['n'])} peer games"),
         W.card(f"{me['acpl']:.0f}", "Your ACPL",
                f"peers {co['acpl']:.0f} · "
                f"{_gap(me['acpl'], co['acpl'], 0, lower_is_better=True)}"),
-        W.card(f"{me['winpct']:.0f}%", "Won",
-               f"peers {co['winpct']:.0f}%"),
-    ])
+        W.card(f"{100 * me['blunders'] / n:.1f}" if n else "—",
+               "Blunders / 100 moves",
+               f"peers {100 * co['blunders'] / cn:.1f}" if cn else ""),
+    ]
+    # Win rate is deliberately absent: both sides of every corpus game are
+    # counted, so the band's wins equal its losses by construction and the
+    # figure is pinned near (100 - draws)/2 whatever the players did. There is
+    # nothing there to compare against.
+    if ctx.percentile:
+        pc, players = ctx.percentile
+        suffix = "th" if 10 <= pc % 100 <= 13 else {1: "st", 2: "nd", 3: "rd"}.get(pc % 10, "th")
+        cards.append(W.card(f"{pc}{suffix}", "Percentile in your band",
+                            f"among {players} players' averages"))
+    return W.cards(cards)
 
 
 @metric("brackets", title="Where the gap is", order=20)
@@ -48,26 +58,18 @@ def by_phase(ctx):
              f"{me[k + '_bl']:.2f} / {co[k + '_bl']:.2f}",
              f"{me[k + '_mi']:.2f} / {co[k + '_mi']:.2f}"]
             for k, label in PHASES]
+    note = ("Same engine, same depth, same phase boundaries on both sides. "
+            "A negative gap marks the phase where your band pulls ahead of you.")
+    if me["acc"] < co["acc"] and all(
+            (me[k + "_acc"] or 0) >= (co[k + "_acc"] or 0) for k, _ in PHASES):
+        note += (" Note the shape here: your accuracy is higher in every phase "
+                 "yet lower overall. Game accuracy punishes catastrophes, and "
+                 "the blunder columns are where that shows.")
+    if me["dec_move"] and co["dec_move"]:
+        note += (f" Your games are decided around move {me['dec_move']:.0f}, "
+                 f"your band's around move {co['dec_move']:.0f}.")
     return [
-        W.text("Same engine, same depth, same phase boundaries on both sides. "
-               "A negative gap marks the phase where your band pulls ahead of you."),
+        W.text(note),
         W.table(["Phase", "You", "Peers", "Gap",
                  "Blunders/100 (you / them)", "Mistakes/100 (you / them)"], rows),
     ]
-
-
-@metric("brackets", title="How your band scores", order=30)
-def distribution(ctx):
-    """Where your average sits in the spread of individual peer games."""
-    if not _peers(ctx) or not ctx.hist:
-        return None
-    total = sum(n for _, n in ctx.hist)
-    mine = ctx.me["acc"]
-    rows = []
-    for bucket, n in ctx.hist:
-        here = bucket <= mine < bucket + 5
-        rows.append({"label": f"{bucket}–{bucket + 4}" + (" ← you" if here else ""),
-                     "segments": [{"name": "you" if here else "games", "value": n}],
-                     "note": f"{100 * n / total:.0f}%"})
-    return W.barstack(rows, {"games": "#8aa4b8", "you": "#3f7d5a"},
-                      title=f"Accuracy of {total} peer games")

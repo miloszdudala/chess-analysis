@@ -62,35 +62,44 @@ def analyse_pgn(pgn_text: str, engine, depth: int = DEPTH) -> dict | None:
     moves = list(game.mainline_moves())
     if not moves:
         return None
-    evals, best_uci, san, uci, fens = [], [], [], [], []
+    evals, best_uci, san, uci, fens, top = [], [], [], [], [], []
     eg_ply, t0 = None, time.time()
 
     def ev(b):
         if b.is_game_over():
             if b.is_checkmate():
-                return (-eng.MATE_CP if b.turn == chess.WHITE else eng.MATE_CP), ""
-            return 0, ""
+                return (-eng.MATE_CP if b.turn == chess.WHITE else eng.MATE_CP), "", []
+            return 0, "", []
         info = engine.analyse(b, chess.engine.Limit(depth=depth), multipv=MULTIPV)
         if isinstance(info, list):
             info = info[0]
         pv = info.get("pv")
-        return info["score"].white().score(mate_score=eng.MATE_CP), (pv[0].uci() if pv else "")
+        cp = info["score"].white().score(mate_score=eng.MATE_CP)
+        best = pv[0].uci() if pv else ""
+        # The principal variation is recorded even at multipv 1. It costs
+        # nothing — the engine already searched it — and without it the stats
+        # that ask what the refutation *was* (blunder anatomy, opponent-error
+        # capitalisation) have nothing to compare the played move against and
+        # silently collapse to a single bucket.
+        return cp, best, ([{"uci": best, "cp": cp}] if best else [])
 
     for i, mv in enumerate(moves):
         if eg_ply is None and _material(board) <= ENDGAME_MATERIAL:
             eg_ply = i + 1
-        cp, best = ev(board)
+        cp, best, tm = ev(board)
         evals.append(cp)
         best_uci.append(best)
+        top.append(tm)
         fens.append(board.fen())
         san.append(board.san(mv))
         uci.append(mv.uci())
         board.push(mv)
-    cp, _ = ev(board)
+    cp, _, tm = ev(board)
     evals.append(cp)
+    top.append(tm)
     fens.append(board.fen())
     return {"evals": evals, "best_uci": best_uci, "moves_san": san, "moves_uci": uci,
-            "fens": fens, "top_moves": [], "eg_ply": eg_ply,
+            "fens": fens, "top_moves": top, "eg_ply": eg_ply,
             "secs": round(time.time() - t0, 2)}
 
 

@@ -26,6 +26,8 @@ PHASES = (("op", "Opening"), ("mg", "Middlegame"), ("eg", "Endgame"))
 # by about half an accuracy point — the size of the effect being measured.
 _AGG = """
   COUNT(*)                            AS n,
+  SUM(s.op_n + s.mg_n + s.eg_n)       AS moves,
+  SUM(s.blun)                         AS blunders,
   AVG(s.acc)                          AS acc,
   AVG(s.acpl)                         AS acpl,
   AVG(s.plies)                        AS plies,
@@ -105,6 +107,48 @@ def percentile(value: float, lo: int, hi: int, depth: int = DEPTH) -> int | None
         "JOIN games g ON g.gid=s.gid WHERE g.source='corpus' AND s.depth=? "
         "AND s.elo BETWEEN ? AND ?", (value, depth, lo, hi)).fetchone()
     return round(row[0]) if row and row[0] is not None else None
+
+
+def player_percentile(value: float, lo: int, hi: int, depth: int = DEPTH,
+                      min_games: int = 5) -> tuple[int, int] | None:
+    """Where an average sits among the cohort's *player* averages.
+
+    Comparing your average against the spread of individual games is not a
+    like-for-like question: a single game swings far more than an average of
+    many, so any average lands mid-range whatever it is. Averaging each player
+    first puts both sides on the same footing.
+    """
+    if value is None:
+        return None
+    rows = store.connect().execute(
+        "SELECT AVG(s.acc) a FROM samples s JOIN games g ON g.gid=s.gid "
+        "WHERE g.source='corpus' AND s.depth=? AND s.elo BETWEEN ? AND ? "
+        "GROUP BY CASE WHEN s.color='white' THEN g.white ELSE g.black END "
+        "HAVING COUNT(*) >= ?", (depth, lo, hi, min_games)).fetchall()
+    avgs = [r[0] for r in rows if r[0] is not None]
+    if len(avgs) < 20:
+        return None
+    return round(100 * sum(a < value for a in avgs) / len(avgs)), len(avgs)
+
+
+def my_pairs(user: str, depth: int = DEPTH):
+    """(Game, GameAnalysis) for your own games, at the corpus depth.
+
+    Same engine and depth as the cohort — a review-depth analysis would tilt
+    every comparison here by about half an accuracy point.
+    """
+    from ..enrich import engine as eng
+    from ..model import load_games
+
+    out = []
+    for g in load_games(user):
+        raw = store.load_analysis(g.game_id, depth)
+        if not raw or not raw.get("evals"):
+            continue
+        raw = _rehydrate(raw, g.pgn)
+        if raw:
+            out.append((g, eng._derive(raw, depth, "corpus")))
+    return out
 
 
 def coverage(depth: int = DEPTH) -> list[dict]:

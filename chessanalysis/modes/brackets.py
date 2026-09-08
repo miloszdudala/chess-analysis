@@ -11,7 +11,7 @@ tables.
 from __future__ import annotations
 
 from . import mode, run_metrics
-from .. import corpus, insights, weaknesses
+from .. import corpus, weaknesses
 from ..contexts import CohortContext
 from ..document import Document
 
@@ -42,6 +42,30 @@ def _no_drilldown(widgets):
     return out
 
 
+def _depersonalise(widgets):
+    """Reword a reused section that now describes a population, not a person.
+
+    The player report addresses you directly, which is right there and wrong
+    here: these rows are hundreds of different players' habits.
+    """
+    swap = [("You play", "Move played"), ("Your score (W-D-L)", "Score (W-D-L)"),
+            ("Exact positions you reached", "Positions reached"),
+            ("answered with the same move", "answered with the same move by "
+             "different players"),
+            (" Click a row to open the games behind it.", ""),
+            ("your repertoire", "the corpus"), ("repertoire habits", "shared habits")]
+    out = []
+    for w in widgets:
+        w = dict(w)
+        if "columns" in w:
+            w["columns"] = [next((b for a, b in swap if a == c), c) for c in w["columns"]]
+        if w.get("type") == "text":
+            for a, b in swap:
+                w["body"] = w["body"].replace(a, b)
+        out.append(w)
+    return out
+
+
 @mode("brackets")
 def brackets(username: str = "", scope: str = "ladder", window: int = 70,
              depth: int | None = None) -> Document:
@@ -63,8 +87,8 @@ def brackets(username: str = "", scope: str = "ladder", window: int = 70,
         if not ctx.cohort:
             raise SystemExit(f"The corpus holds no games at {ctx.lo}-{ctx.hi} yet "
                              "— use Expand database.")
-        ctx.hist = corpus.accuracy_histogram(ctx.lo, ctx.hi, depth)
-        ctx.percentile = corpus.percentile(ctx.me["acc"], ctx.lo, ctx.hi, depth)
+        ctx.percentile = corpus.player_percentile(ctx.me["acc"], ctx.lo,
+                                                  ctx.hi, depth)
         title = f"{username} vs peers"
         sub = (f"{my_elo} ± {window} · {int(ctx.cohort['n'])} peer games vs "
                f"{int(ctx.me['n'])} of yours · depth {depth}")
@@ -81,21 +105,14 @@ def brackets(username: str = "", scope: str = "ladder", window: int = 70,
                    meta={"scope": scope, "depth": depth, **t})
     run_metrics("brackets", ctx, doc)
 
-    if scope == "peers":
-        # The player report's own analysis, run over the band instead of over
-        # you. Same functions, same thresholds — so "why they lose" is directly
-        # comparable with the "why you lose" on your Player report tab.
-        ps = corpus.pairs(ctx.lo, ctx.hi, depth, limit=REUSE_LIMIT)
-        cp = int(__import__("chessanalysis").config.get("DECISIVE_CP", "200"))
-        # `weaknesses.report` is unpacked rather than called whole: its
-        # phase-parity section compares a player with their opponents, and here
-        # both sides are drawn from the same band, so it reads a flat +/-0.3
-        # by construction. The rest transfer intact.
-        for sec in (insights.outcome_reasons(ps, cp)
-                    + weaknesses.blunder_anatomy(ps)
-                    + weaknesses.think_time(ps)
-                    + weaknesses.opening_leaks(ps)
-                    + insights.advanced_report(ps)):
-            doc.add(f"{sec['title']} — your band",
-                    _no_drilldown(sec["widgets"]), category="Your band")
+    if scope == "ladder":
+        # Recurring opening mistakes wants a population, not a comparison:
+        # across hundreds of players a position answered badly again and again
+        # is a habit of the *rating*, which is exactly the ladder's subject.
+        # At peers scope the me-vs-band metrics in metrics/brackets/compare.py
+        # do the reusing instead, tallying both sides through the report's own
+        # classifiers rather than copying its sections unchanged.
+        for sec in weaknesses.opening_leaks(corpus.pairs(0, 9999, depth, 400)):
+            doc.add("Openings the corpus keeps getting wrong",
+                    _depersonalise(_no_drilldown(sec["widgets"])))
     return doc

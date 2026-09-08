@@ -26,6 +26,8 @@ def colour_split(ctx):
     """
     from ... import corpus
 
+    if ctx.scope != "ladder":
+        return None                # a corpus-wide fact, with no "you" side
     split = [s for s in corpus.colour_split(ctx.depth) if s["games"] >= 30]
     if not split:
         return None
@@ -52,6 +54,8 @@ def where_decided(ctx):
     Counting both sides doubles this rather than mirroring it — it is a
     property of the game, not of who won — so it is meaningful at either scope.
     """
+    if ctx.scope != "ladder":
+        return None       # at peers scope this lives as a line in "Where the gap is"
     rows = []
     for label, d in _rows(ctx):
         if not d:

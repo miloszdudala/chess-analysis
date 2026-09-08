@@ -18,7 +18,6 @@ from __future__ import annotations
 
 from collections import Counter
 
-import chess
 
 from . import widgets as W
 from .clocks import clock_profile
@@ -75,97 +74,16 @@ def phase_parity(pairs) -> list[dict]:
     ]}]
 
 
-# --- 2) blunder anatomy -------------------------------------------------------
-
-_VAL = {chess.PAWN: 1, chess.KNIGHT: 3, chess.BISHOP: 3, chess.ROOK: 5,
-        chess.QUEEN: 9}
-ANATOMY_ORDER = ["Allowed a forced mate", "Hung a piece",
-                 "Lost material to a capture", "Fork / double attack",
-                 "Check-driven tactic", "Piece left attacked",
-                 "Positional / other"]
-
-
-def _classify_blunder(m, a, sgn) -> str:
-    """What did the engine's refutation of this blunder actually do?"""
-    cand = a.top_moves[m.ply] if 0 <= m.ply < len(a.top_moves) else []
-    if not cand:
-        return "Positional / other"
-    if sgn * cand[0]["cp"] <= -(MATE_CP - 1000):
-        return "Allowed a forced mate"
-    try:
-        board = chess.Board(m.fen_before)
-        board.push(chess.Move.from_uci(m.move_uci))
-        ref = chess.Move.from_uci(cand[0]["uci"])
-        if ref not in board.legal_moves:
-            return "Positional / other"
-    except ValueError:
-        return "Positional / other"
-
-    me = not board.turn                    # after my move, opponent to move
-    if board.is_capture(ref):
-        return ("Hung a piece" if not board.attackers(me, ref.to_square)
-                else "Lost material to a capture")
-
-    board.push(ref)
-    piece = board.piece_at(ref.to_square)
-    targets = 0
-    for sq in board.attacks(ref.to_square):
-        p = board.piece_at(sq)
-        if p and p.color == me and p.piece_type != chess.KING and \
-                (_VAL[p.piece_type] > _VAL.get(piece.piece_type, 0)
-                 or not board.attackers(me, sq)):
-            targets += 1
-    check = board.is_check()
-    if targets + check >= 2:
-        return "Fork / double attack"
-    if check:
-        return "Check-driven tactic"
-    if targets:
-        return "Piece left attacked"
-    return "Positional / other"
-
-
-def blunder_anatomy(pairs) -> list[dict]:
-    """Your blunders grouped by the tactic they allowed."""
-    buckets: dict[str, list] = {}
-    total = 0
-    for g, a in pairs:
-        sgn = 1 if g.color == "white" else -1
-        for m in a.moves:
-            if m.color != g.color or m.label != "blunder":
-                continue
-            total += 1
-            kind = _classify_blunder(m, a, sgn)
-            buckets.setdefault(kind, []).append({
-                "id": getattr(g, "game_id", ""),
-                "ply": m.ply,                     # land on the blunder itself
-                "date": getattr(g, "date", ""),
-                "opponent": getattr(g, "opponent", "?"),
-                "outcome": getattr(g, "outcome", ""),
-                "note": f"{_mv(m)} · −{m.wp_loss:.0f}% win"
-                        + (f", best {m.best_san}" if m.best_san else ""),
-            })
-    if total < 10:
-        return []
-    rows = []
-    for kind in ANATOMY_ORDER:
-        ex = buckets.get(kind)
-        if not ex:
-            continue
-        rows.append({
-            "cells": [kind, len(ex), f"{round(100 * len(ex) / total)}%"],
-            "games": sorted(ex, key=lambda e: e["date"], reverse=True),
-        })
-    return [{"title": "Blunder anatomy", "widgets": [
-        W.text(f"Your {total} blunders, grouped by what the engine's refutation "
-               f"does on the board — the kind of tactic you keep allowing. "
-               f"'Hung a piece' means the refutation captures something with no "
-               f"defender; 'positional / other' means no immediate tactic, the "
-               f"evaluation simply collapsed. Click a row to see the games — "
-               f"each opens on the board at that blunder."),
-        W.drilltable(["What you allowed", "Blunders", "Share"], rows),
-    ]}]
-
+# Blunder anatomy used to live here: blunders grouped by the tactic the
+# engine's refutation exploited. It was removed rather than repaired. Material
+# and checks a rule can settle — exchange evaluation says whether a capture
+# actually wins something — but the motifs worth naming are pins, discovered
+# attacks, deflection, an overloaded defender, a king gone quietly unsafe, and
+# none of those follow from the position by any arrangement of if-statements.
+# Measured against exchange evaluation, its largest bucket was 45% wrong. A
+# taxonomy that is confidently wrong about half its rows is worse than no
+# taxonomy: the blunder counts and the phase split say what happened without
+# claiming to know why.
 
 # --- 3) think time vs move quality --------------------------------------------
 
@@ -307,6 +225,5 @@ def opening_leaks(pairs) -> list[dict]:
 
 
 def report(pairs) -> list[dict]:
-    """All four weakness diagnostics, in reading order."""
-    return (phase_parity(pairs) + blunder_anatomy(pairs)
-            + think_time(pairs) + opening_leaks(pairs))
+    """All three weakness diagnostics, in reading order."""
+    return phase_parity(pairs) + think_time(pairs) + opening_leaks(pairs)

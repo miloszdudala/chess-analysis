@@ -47,31 +47,6 @@ def test_phase_parity_needs_sample():
 
 # --- blunder anatomy ----------------------------------------------------------
 
-def hung_queen_game():
-    """3. Qxf7?? Kxf7 — the queen is captured with no white defender."""
-    fen = "r1bqkbnr/pppp1ppp/2n5/4p2Q/4P3/8/PPPP1PPP/RNB1KBNR w KQkq - 2 3"
-    m = mev(5, "white", "blunder", cpl=800, san="Qxf7+", fen=fen, uci="h5f7")
-    tops = [[] for _ in range(5)] + [[{"uci": "e8f7", "cp": -700}]]
-    return WGame("loss"), analysis([m], evals=[0] * 7, top_moves=tops)
-
-
-def test_blunder_anatomy_classifies_hung_piece():
-    pairs = [hung_queen_game() for _ in range(10)]
-    out = wk.blunder_anatomy(pairs)
-    tbl = out[0]["widgets"][1]
-    assert tbl["type"] == "drilltable"
-    row = tbl["rows"][0]
-    assert row["cells"] == ["Hung a piece", 10, "100%"]
-    # every occurrence drills down to a game, landing on the blunder ply
-    assert len(row["games"]) == 10
-    assert all(gm["ply"] == 5 for gm in row["games"])
-    assert "Qxf7+" in row["games"][0]["note"]
-
-
-def test_blunder_anatomy_gated_below_ten():
-    assert wk.blunder_anatomy([hung_queen_game()]) == []
-
-
 # --- think time ---------------------------------------------------------------
 
 def timed_game():

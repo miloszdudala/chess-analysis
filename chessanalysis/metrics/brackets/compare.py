@@ -1,7 +1,7 @@
 """You against your band, using the report's own classifiers.
 
 These reuse the same functions the Player report runs — `diagnosis.diagnose`,
-`weaknesses._classify_blunder`, the think-time buckets — but tally both sides
+the think-time buckets — but tally both sides
 and show them together. Running them on the band alone, as an unmodified copy
 of the player report would, answers a question nobody asked: it describes 400
 strangers under headings that say "you".
@@ -86,27 +86,6 @@ def reasons(ctx):
             widgets.append(W.table(
                 [label, f"You ({sum(mt[outcome].values())})", "Your band", "Gap"], rows))
     return widgets if len(widgets) > 1 else None
-
-
-@metric("brackets", title="What your blunders allow", order=55)
-def blunder_kinds(ctx):
-    """Blunders grouped by what the engine's refutation does on the board."""
-    if not _peers(ctx):
-        return None
-    mine, theirs = _both(ctx)
-
-    def tally(pairs):
-        c = Counter()
-        for g, a in pairs:
-            sgn = 1 if g.color == "white" else -1
-            for m in a.blunders(g.color):
-                c[wk._classify_blunder(m, a, sgn)] += 1
-        return c
-
-    rows = _rows(tally(mine), tally(theirs), lambda k: k, order=wk.ANATOMY_ORDER)
-    if not rows:
-        return None
-    return W.table(["What you allowed", "You", "Your band", "Gap"], rows)
 
 
 @metric("brackets", title="Punishing their mistakes", order=58)

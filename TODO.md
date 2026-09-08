@@ -58,3 +58,56 @@ Whatever the approach: the audit that caught this is the deliverable. Classify a
 sample, then check each label against something independent (exchange evaluation
 for material claims), and report the disagreement rate. A classifier nobody has
 measured is a classifier nobody should trust.
+
+## 3. A better opening / middlegame / endgame split
+
+Today the split is nothing but the move number:
+
+```python
+def _phase(move_no):
+    if move_no <= 12:  return "Opening"
+    if move_no <= 32:  return "Middlegame"
+    return "Endgame"
+```
+
+It is copied verbatim into three files — `insights.py`, `weaknesses.py` and
+`corpus/analyse.py` — which is its own small problem: any change has to be made
+three times, and the corpus one is baked into every stored sample row.
+
+This matters more than it looks, because the phase split is now carrying most
+of the signal on the Brackets tab. "Middlegame blunders halve from 1800 to
+2100" is the headline finding there, and it rests on a definition of
+middlegame that is just "moves 13 to 32".
+
+### What the data says
+
+`corpus/analyse.py` already computes and stores `eg_ply` — the first ply at
+which non-pawn material for both sides together drops to 13 or less — on every
+analysis. Nothing reads it. Across 1130 analysed games:
+
+- **71% never reach a material endgame at all**, yet every one of them has its
+  moves past 32 labelled "Endgame". That bucket is mostly late middlegame.
+- Of the 29% that do, it begins at median move 38, 10th percentile 28, 90th
+  percentile 52.
+- 37% of those differ from move 33 by more than eight moves.
+
+Caveat on that 71%: a combined threshold of 13 is strict — rook and bishop each
+side is 16 and would not count — so the number reflects the threshold as much
+as the games. The threshold is itself a parameter worth choosing deliberately
+rather than inheriting.
+
+### Directions
+
+- Define the endgame by material, not by move number, and pick the threshold
+  with evidence. Queens-off is the other common rule and is easy to compute.
+- The opening boundary is a different question entirely: it wants "when did the
+  players leave known theory", not a move count. `opening_leaks` already works
+  on repeated positions, and an ECO code is in every PGN header, so first
+  deviation from a book line is reachable without an opening database.
+- Whatever is chosen, put it in **one** place and have the other two import it.
+- Re-deriving the corpus does not need the engine: the phase aggregates in
+  `samples` come from the eval array plus the PGN, both of which are stored.
+  See `corpus._rehydrate`. Recomputing the split is a backfill, not a re-analysis.
+- Before shipping it, check the ladder still holds. If "middlegame blunders
+  halve across 400 Elo" survives a material-based boundary, it is a fact about
+  chess; if it moves a lot, it was partly a fact about move 32.

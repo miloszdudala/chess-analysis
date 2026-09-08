@@ -1,34 +1,34 @@
-"""Your accuracy against your band's — as two distributions, not two averages.
+"""How many of your games land in each accuracy band.
 
-An average hides the thing that actually distinguishes players at one rating:
-not where the middle of their play sits, which barely moves across a band, but
-how wide the tail of bad games is. Two players averaging 80 are different
-players if one ranges 76-84 and the other 60-95.
-
-Both sides are binned the same way and normalised to their own game count, so a
-16-game history and a 1254-game cohort are directly readable against each other.
+A plain frequency count: group your games by the accuracy they scored and say
+how many fell in each bucket. The band's share sits alongside as context —
+raw counts could not, since it holds a thousand games to your handful — so a
+bucket that is over- or under-represented in your play is visible without
+having to hold two averages in your head.
 """
 from ... import widgets as W
 from ...registry import metric
 
 STEP = 5
-FLOOR = 45          # everything below this is one bucket: a rout is a rout
-QS = (10, 25, 50, 75, 90)
+FLOOR = 45          # below this it is a rout; one bucket is enough
 
 
 def _bucket(v):
     return FLOOR - STEP if v < FLOOR else int(v // STEP * STEP)
 
 
-def _hist(values):
-    """{bucket: share of this side's games}, as percentages."""
+def _label(b):
+    return "under 45" if b < FLOOR else f"{b}–{b + STEP - 1}"
+
+
+def _counts(values):
     out = {}
     for v in values:
         out[_bucket(v)] = out.get(_bucket(v), 0) + 1
-    return {b: 100 * n / len(values) for b, n in out.items()}
+    return out
 
 
-@metric("brackets", title="Accuracy spread — you against your band", order=25)
+@metric("brackets", title="Your games by accuracy", order=25)
 def distribution(ctx):
     from ... import corpus
 
@@ -39,37 +39,24 @@ def distribution(ctx):
     if len(mine) < 5 or len(band) < 100:
         return None
 
-    mh, bh = _hist(mine), _hist(band)
-    buckets = sorted(set(mh) | set(bh))
-    label = {b: ("<45" if b < FLOOR else f"{b}–{b + STEP - 1}") for b in buckets}
-
-    curves = W.xyline(
-        [{"name": f"You ({len(mine)} games)", "color": "#c1573f",
-          "points": [{"x": b, "y": round(mh.get(b, 0), 1)} for b in buckets]},
-         {"name": f"Your band ({len(band)})", "color": "#8aa4b8",
-          "points": [{"x": b, "y": round(bh.get(b, 0), 1)} for b in buckets]}],
-        y_label="% of that side's games", x_label="Game accuracy", y_zero=True)
-
-    mq, bq = corpus.quantiles(mine, QS), corpus.quantiles(band, QS)
-    rows = [[f"{q}th percentile", f"{mq[q]:.1f}", f"{bq[q]:.1f}",
-             f"{mq[q] - bq[q]:+.1f}"] for q in QS]
-    rows.append(["Spread (10th→90th)", f"{mq[90] - mq[10]:.1f}",
-                 f"{bq[90] - bq[10]:.1f}", f"{(mq[90] - mq[10]) - (bq[90] - bq[10]):+.1f}"])
-
-    bars = W.barstack(
-        [{"label": label[b],
-          "segments": [{"name": "you", "value": round(mh.get(b, 0), 1)},
-                       {"name": "band", "value": round(bh.get(b, 0), 1)}],
-          "note": f"you {mh.get(b, 0):.0f}% · band {bh.get(b, 0):.0f}%"}
-         for b in buckets],
-        {"you": "#c1573f", "band": "#8aa4b8"})
-
+    mc, bc = _counts(mine), _counts(band)
+    buckets = sorted(set(mc) | set(bc), reverse=True)     # best games first
+    rows, bars = [], []
+    for b in buckets:
+        n = mc.get(b, 0)
+        mine_pct = 100 * n / len(mine)
+        band_pct = 100 * bc.get(b, 0) / len(band)
+        rows.append([_label(b), n, f"{mine_pct:.0f}%", f"{band_pct:.0f}%",
+                     f"{mine_pct - band_pct:+.0f}"])
+        bars.append({"label": _label(b),
+                     "segments": [{"name": "games", "value": n}],
+                     "note": f"{n} · band {band_pct:.0f}%"})
     return [
-        W.text("Each side is binned the same way and shown as a share of its "
-               "own games, so a short history reads against a large cohort. "
-               "The percentile table is the robust summary — with few games "
-               "the curve is spiky, but its quartiles still mean something."),
-        curves,
-        W.table(["", "You", "Your band", "Gap"], rows),
-        bars,
+        W.text(f"Your {len(mine)} games grouped by the accuracy each one "
+               f"scored, against how the band's {len(band)} games fall. The "
+               f"band column is a share rather than a count — it holds a "
+               f"thousand games to your handful."),
+        W.table(["Accuracy", "Your games", "Share of yours", "Your band", "Gap"],
+                rows),
+        W.barstack(bars, {"games": "#8aa4b8"}),
     ]

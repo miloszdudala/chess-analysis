@@ -108,7 +108,10 @@ history, marked ⚑:
   in the game's review.
 - **Opponent banned for fair play** — detected automatically. Chess.com
   publishes an account's standing, so opponents are checked on sync and games
-  against a closed account are dropped. Chess.com refunds the rating such a game
+  against a closed account are dropped. How often a clean status is re-checked
+  depends on how recently you played them: an account closes days to weeks
+  after the games that closed it, so opponents from the last 45 days are
+  re-checked twice a day and older ones weekly. Chess.com refunds the rating such a game
   cost you, but days later, which leaves a dip and then a jump in the rating
   curve; `ratings.py` adds the points back over exactly that stretch so the
   curve is continuous. A win or draw against someone later banned keeps its

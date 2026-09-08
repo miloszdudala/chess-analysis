@@ -87,3 +87,29 @@ def test_nothing_is_flagged_before_any_lookup(isolated_cache):
     games = [FakeGame("g1", "cheat")]
     assert fairplay.cheated_ids(games) == set()
     assert fairplay.flags(games) == {}
+
+
+def test_a_recent_opponent_is_rechecked_long_before_the_normal_ttl(offline):
+    """Chess.com closes an account days to weeks after the games. An opponent
+    from last week is exactly the one about to flip, so the week-long TTL would
+    hide the ban for the whole window in which it actually arrives."""
+    played = time.time() - 2 * 86400                 # played two days ago
+    fairplay.refresh([("honest", played)])
+    # a day later the normal TTL has nowhere near expired...
+    cache.save("fairplay", "honest",
+               {"status": "basic", "checked": time.time() - 86400})
+    offline.clear()
+    fairplay.refresh(["honest"])                     # ...without recency: skipped
+    assert offline == []
+    fairplay.refresh([("honest", played)])           # ...with it: re-checked
+    assert offline == ["honest"]
+
+
+def test_an_old_opponent_keeps_the_cheap_ttl(offline):
+    long_ago = time.time() - 200 * 86400
+    fairplay.refresh([("honest", long_ago)])
+    cache.save("fairplay", "honest",
+               {"status": "basic", "checked": time.time() - 2 * 86400})
+    offline.clear()
+    fairplay.refresh([("honest", long_ago)])
+    assert offline == []                             # settled: no request

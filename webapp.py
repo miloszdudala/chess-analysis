@@ -165,7 +165,7 @@ def _sync(user, force=False):
                 "fresh": True, "banned": []}
     res = scraper.scrape(user)             # hits the Chess.com API
     games = load_games(user, include_flagged=True)
-    res["banned"] = fairplay.refresh([g.opponent for g in games])["banned"]
+    res["banned"] = fairplay.refresh(fairplay.opponents_of(games))["banned"]
     _LAST_SYNC[user.lower()] = time.time()
     res["user"] = user
     res["fresh"] = False

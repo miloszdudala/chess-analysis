@@ -711,7 +711,8 @@ function buildEvalCurve(host, groupings, dflt, yLabel) {
       return `<button class="evc-key${off}" data-name="${esc(s.name)}">` +
         `<span class="evc-sw${s.dash ? " dashed" : ""}" ` +
         `style="${s.dash ? "border-color" : "background"}:${colorOf(s)}"></span>` +
-        `${esc(s.name)}</button>`;
+        `${esc(s.name)}${s.games ? ` <span class="evc-n">(${s.games})</span>` : ""}` +
+        `</button>`;
     }).join("");
     leg.onclick = (e) => {
       const key = e.target.closest(".evc-key"); if (!key) return;

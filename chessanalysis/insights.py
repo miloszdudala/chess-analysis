@@ -173,6 +173,13 @@ def _avg_eval_series(pairs, label_of, order, max_moves: int = 60) -> list[dict]:
     for a group only while ≥20% of that group's games are still going, so the
     long tail doesn't wander on a handful of games. Evals are clamped to ±10
     pawns so one mate score can't dominate the mean.
+
+    The floor is two samples — one game, which contributes both its plies at
+    every move number it reaches. It must not be higher: a hard floor of four
+    silently erased any group holding a single game, so a lone loss with White
+    simply had no line and nothing said why. Each series carries its `games`
+    count instead, which the legend shows, so a thin line is visibly thin
+    rather than absent.
     """
     sums, cnts, gcount = {}, {}, {}
     for g, a in pairs:
@@ -196,11 +203,12 @@ def _avg_eval_series(pairs, label_of, order, max_moves: int = 60) -> list[dict]:
         if lab not in sums:
             continue
         dash = bool(rest[0]) if rest else False
-        floor = max(4, 0.4 * gcount[lab])            # ~20% of games (2 plies each)
+        floor = max(2, 0.4 * gcount[lab])            # ~20% of games (2 plies each)
         pts = [{"x": mv, "y": round(sums[lab][mv] / cnts[lab][mv] / 100, 2)}
                for mv in sorted(sums[lab]) if cnts[lab][mv] >= floor]
         if len(pts) >= 2:
-            series.append({"name": lab, "color": color, "dash": dash, "points": pts})
+            series.append({"name": lab, "color": color, "dash": dash,
+                           "games": gcount[lab], "points": pts})
     return series
 
 

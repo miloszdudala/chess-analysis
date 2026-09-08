@@ -456,6 +456,7 @@ _CSS = """
   .evc-key { display:inline-flex; align-items:center; gap:.35rem; cursor:pointer;
              background:none; border:0; padding:.1rem .15rem; color:var(--mut);
              font:inherit; border-radius:5px; }
+  .evc-n { color:var(--mut); font-size:.9em; }
   .evc-key:hover { color:var(--ink); }
   .evc-key.off { opacity:.4; text-decoration:line-through; }
   .evc-sw { width:.85rem; height:.32rem; border-radius:2px; display:inline-block; }

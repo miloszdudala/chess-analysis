@@ -40,17 +40,14 @@ def distribution(ctx):
         return None
 
     mc, bc = _counts(mine), _counts(band)
-    buckets = sorted(set(mc) | set(bc), reverse=True)     # best games first
-    rows, bars = [], []
-    for b in buckets:
+    rows = []
+    for b in sorted(set(mc) | set(bc), reverse=True):     # best games first
         n = mc.get(b, 0)
         mine_pct = 100 * n / len(mine)
         band_pct = 100 * bc.get(b, 0) / len(band)
         rows.append([_label(b), n, f"{mine_pct:.0f}%", f"{band_pct:.0f}%",
                      f"{mine_pct - band_pct:+.0f}"])
-        bars.append({"label": _label(b),
-                     "segments": [{"name": "games", "value": n}],
-                     "note": f"{n} · band {band_pct:.0f}%"})
+    # No chart underneath: it plotted the column beside it and nothing more.
     return [
         W.text(f"Your {len(mine)} games grouped by the accuracy each one "
                f"scored, against how the band's {len(band)} games fall. The "
@@ -58,5 +55,4 @@ def distribution(ctx):
                f"thousand games to your handful."),
         W.table(["Accuracy", "Your games", "Share of yours", "Your band", "Gap"],
                 rows),
-        W.barstack(bars, {"games": "#8aa4b8"}),
     ]

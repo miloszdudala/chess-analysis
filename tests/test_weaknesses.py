@@ -45,8 +45,6 @@ def test_phase_parity_needs_sample():
     assert wk.phase_parity([(WGame(), analysis(moves))]) == []
 
 
-# --- blunder anatomy ----------------------------------------------------------
-
 # --- think time ---------------------------------------------------------------
 
 def timed_game():

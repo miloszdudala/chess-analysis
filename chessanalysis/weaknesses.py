@@ -1,12 +1,10 @@
 """Weakness-finding diagnostics over many analysed games.
 
-Four views, all purely descriptive (numbers, not advice), each built to give a
+Three views, all purely descriptive (numbers, not advice), each built to give a
 fair baseline rather than a confounded one:
 
   * phase parity     — you vs your opponents in the SAME games, phase by phase,
                        so "middlegames are just harder" cancels out;
-  * blunder anatomy  — what tactic each of your blunders actually allowed,
-                       classified from the engine's refutation on the board;
   * think time       — move quality by seconds spent and by clock remaining;
   * opening leaks    — exact recurring positions where you repeat a move that
                        loses evaluation.

@@ -168,3 +168,16 @@ def test_analysis_job_status_without_games(client):
 
 def test_unknown_format_is_rejected(client):
     assert client.get("/api/games?user=x&format=hyperbullet").status_code == 400
+
+
+def test_account_names_are_validated(client):
+    assert client.get("/api/games?user=../../etc").status_code == 400
+    assert client.get("/api/scout?opp=a%20b").status_code == 400
+
+
+def test_a_game_from_another_account_is_a_clean_400(client):
+    from .conftest import GAME_SANS, store_game
+
+    store_game("tester", "rival", 2000, 2000, GAME_SANS, source="own")
+    r = client.get("/api/game?user=tester&selector=185466884256")
+    assert r.status_code == 400 and "185466884256" in r.get_json()["error"]

@@ -11,6 +11,7 @@ have endpoints of their own.
 from __future__ import annotations
 
 import os
+import re
 import time
 from functools import wraps
 
@@ -39,11 +40,22 @@ def api(fn):
     return wrapper
 
 
+# Chess.com usernames: letters, digits, underscores and hyphens. Anything else
+# never reaches an API path.
+_NAME = re.compile(r"^[A-Za-z0-9_-]{1,50}$")
+
+
+def _account(name, what="username"):
+    name = (name or "").strip()
+    if not name:
+        raise ValueError(f"No {what} given.")
+    if not _NAME.match(name):
+        raise ValueError(f"'{name}' is not a Chess.com {what}.")
+    return name
+
+
 def _user():
-    user = (request.args.get("user") or config.get("CHESS_USERNAME") or "").strip()
-    if not user:
-        raise ValueError("No username given.")
-    return user
+    return _account(request.args.get("user") or config.get("CHESS_USERNAME"))
 
 
 def _format():
@@ -369,7 +381,7 @@ def api_explorer():
     from chessanalysis import explorer
 
     user = _user()
-    who = request.args.get("db") or user
+    who = _account(request.args.get("db")) if request.args.get("db") else user
     fmt = _format()
     color = request.args.get("color", "white")
     if color not in ("white", "black"):
@@ -384,7 +396,7 @@ def api_explorer():
 def api_repertoire():
     from chessanalysis import explorer
 
-    who = request.args.get("db") or _user()
+    who = _account(request.args.get("db")) if request.args.get("db") else _user()
     color = request.args.get("color", "white")
     return jsonify(explorer.repertoire(who, color, _format()))
 
@@ -448,9 +460,7 @@ def api_train_grade():
 @app.get("/api/scout")
 @api
 def api_scout():
-    opp = (request.args.get("opp") or "").strip()
-    if not opp:
-        raise ValueError("Name an account to scout.")
+    opp = _account(request.args.get("opp"), "account to scout")
     months = max(1, min(24, request.args.get("months", default=6, type=int)))
     me = request.args.get("user") or config.get("CHESS_USERNAME") or ""
     note = None

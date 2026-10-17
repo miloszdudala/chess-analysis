@@ -15,12 +15,12 @@ def _select(games, selector):
     for g in games:                      # exact game id
         if g.game_id == selector:
             return g
+    if selector.lstrip("-").isdigit() and abs(int(selector)) < len(games):
+        return games[int(selector)]      # index into the chronological list
     matches = [g for g in games if selector.lower() in g.opponent.lower()]
     if matches:
         return matches[-1]               # most recent vs that opponent
-    if selector.lstrip("-").isdigit():   # index into chronological list
-        return games[int(selector)]
-    raise SystemExit(f"No game matched '{selector}'.")
+    raise SystemExit(f"No game '{selector}' among this account's games.")
 
 
 @mode("game")

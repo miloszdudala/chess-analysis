@@ -79,6 +79,18 @@ In the browser, pick a tab:
   the endgame is flat, while middlegame blunders per 100 moves halve. Games
   also get decided later as rating rises: average move 16 at 1800, 19 at 2100,
   with the share settled in the opening falling from 38% to 23%.
+  **The opening** is measured without comparing results, since inside a band
+  everyone scores about 50% and better openings have to be paid for elsewhere.
+  Instead: the engine's win chance you give away on moves 1–12, what your
+  openings get out of opponents, the net, and the clock; theory depth against
+  a book of 280,000 games between 2500+ and 2300+ players (the Lichess Elite
+  Database, CC0), counted only while the opponent is still in book; and the
+  real spread between players at one rating, with ten-game luck taken out. Your
+  repertoire to move 10 is read from the moves you choose, compared between
+  games where the opponent began the same way. *What the opening is worth*
+  compares each corpus player with themselves: knowing the line longer than
+  the opponent is worth about two points at move 12, and does not carry into
+  the middlegame.
   **⊕ Expand database** fetches more games and analyses them in the
   background, filling the thinnest band first.
 - **Compare** — two players side by side.
@@ -146,6 +158,8 @@ chessanalysis/
 ├── model.py               PGN → perspective-bound Game objects (+ parsed moves, clocks)
 ├── fairplay.py            opponents Chess.com closed for cheating (cached lookups)
 ├── ratings.py             rebases the rating curve around a refunded cheated game
+├── book.py                opening theory: the elite-games book and opening names
+├── opening.py             opening strength, repertoire and their statistics
 ├── contexts.py            per-mode input shapes (Player / Game / Compare)
 ├── enrich/engine.py       Stockfish per-move evals, accuracy, blunder detection (cached)
 ├── registry.py            @metric decorator; metrics tagged by scope

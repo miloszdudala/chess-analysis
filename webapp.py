@@ -38,12 +38,15 @@ def _analyse_engine():
 
 # --- background pre-analysis (pre-warm the review cache at review depth) ------
 # Analysing every game at ENGINE_DEPTH ahead of time makes Game Review open
-# instantly (it reads the same disk cache). A single worker thread runs it in
-# the background; progress + a live ETA are polled from /api/prewarm.
+# instantly (it reads the same disk cache). The app starts it on every load and
+# account switch; a single worker thread runs it in the background, and progress
+# + a live ETA are polled from /api/prewarm. `want` is the account the app is
+# showing: a job for any other account stops after its current game.
 _PREWARM_LOCK = threading.Lock()
 _PREWARM_THREAD = None
 _EXPAND_THREAD = None
 _PREWARM = {"running": False, "finished": False, "error": None, "depth": 0,
+            "user": None, "want": None,
             "total": 0, "already": 0, "to_compute": 0, "done": 0,
             "computed": 0, "compute_time": 0.0, "eta": None, "start": 0.0}
 # rough per-game time for a depth-15 full-game pass on this machine; only used
@@ -80,6 +83,9 @@ def _prewarm_worker(user, depth):
         proc = None
         try:
             for g in todo:
+                with _PREWARM_LOCK:
+                    if _PREWARM["want"] != user:     # the app moved on
+                        break
                 if proc is None:
                     proc = chess.engine.SimpleEngine.popen_uci(eng.find_engine())
                 t = time.time()
@@ -187,17 +193,19 @@ def api_scrape():
 def api_prewarm_status():
     """Progress of the background review-cache warm-up. When idle, reports how
     many games still need analysis and a rough time estimate to do them."""
+    user = request.args.get("user") or config.get("CHESS_USERNAME")
     with _PREWARM_LOCK:
-        if _PREWARM["running"] or _PREWARM["finished"]:
+        if _PREWARM["running"] or (_PREWARM["finished"]
+                                   and _PREWARM["user"] == user):
             return jsonify(_prewarm_snapshot())
 
-    user = request.args.get("user") or config.get("CHESS_USERNAME")
     depth = int(config.get("ENGINE_DEPTH", "15"))
     games = load_games(user, include_flagged=True)   # all reviewable
     already = sum(1 for g in games if store.has_analysis(g.game_id, depth))
     todo = len(games) - already
     return jsonify({
         "running": False, "finished": False, "error": None, "depth": depth,
+        "user": user, "want": user,
         "total": len(games), "already": already, "to_compute": todo,
         "done": already, "computed": 0, "compute_time": 0.0, "elapsed": 0,
         "eta": round(todo * EST_SECONDS_PER_GAME),
@@ -208,14 +216,17 @@ def api_prewarm_status():
 @api
 def api_prewarm_start():
     """Kick off (or report) the background analysis of every game at review
-    depth, so Game Review opens instantly afterwards."""
+    depth, so Game Review opens instantly afterwards. A job already running for
+    another account is told to stop; the app asks again once it has."""
     global _PREWARM_THREAD
     user = request.args.get("user") or config.get("CHESS_USERNAME")
     depth = int(config.get("ENGINE_DEPTH", "15"))
     with _PREWARM_LOCK:
+        _PREWARM["want"] = user
         if _PREWARM["running"]:
             return jsonify(_prewarm_snapshot())
         _PREWARM.update(running=True, finished=False, error=None, depth=depth,
+                        user=user,
                         total=0, already=0, to_compute=0, done=0, computed=0,
                         compute_time=0.0, eta=None, start=time.time())
     _PREWARM_THREAD = threading.Thread(

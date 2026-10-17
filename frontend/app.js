@@ -1571,32 +1571,21 @@ function fmtDur(sec) {
 }
 
 function renderPrewarm(s) {
-  const bar = $("prewarm-bar"), fill = $("pw-fill"), txt = $("pw-txt"), btn = $("prewarm");
+  const bar = $("prewarm-bar"), fill = $("pw-fill"), txt = $("pw-txt");
   const pct = s.total ? Math.round((100 * s.done) / s.total) : 0;
   bar.classList.remove("done");
   if (s.running) {
-    btn.disabled = true; btn.textContent = "⏳ Analyzing…";
     bar.classList.add("on"); fill.style.width = pct + "%";
     const left = s.eta == null ? "estimating…" : `${fmtDur(s.eta)} left`;
-    txt.textContent = `Analyzing at depth ${s.depth} · ${s.done}/${s.total} games · ${left}`;
-  } else if (s.finished) {
-    btn.disabled = false; btn.textContent = "✓ Reviews ready";
-    bar.classList.add("on");
-    fill.style.width = "100%";
-    if (s.error) {
-      txt.textContent = `Analysis stopped: ${s.error}`;
-    } else {
-      bar.classList.add("done");
-      txt.textContent = `All ${s.total} games analyzed at depth ${s.depth} — Game Review is now instant.`;
-    }
-  } else if (s.to_compute > 0) {
-    btn.disabled = false; btn.textContent = "⚡ Prepare reviews";
-    btn.title = `Analyze ${s.to_compute} games at depth ${s.depth} (${fmtDur(s.eta)}) so Game Review opens instantly`;
+    txt.textContent = `Preparing reviews at depth ${s.depth} · ${s.done}/${s.total} games · ${left}`;
+  } else if (s.error) {
     bar.classList.add("on"); fill.style.width = pct + "%";
-    txt.textContent = `${s.to_compute} of ${s.total} games not yet analyzed at depth ${s.depth} · ${fmtDur(s.eta)} — click “Prepare reviews”.`;
+    txt.textContent = `Review analysis stopped: ${s.error}`;
+  } else if (s.finished && s.computed > 0) {
+    bar.classList.add("on", "done"); fill.style.width = "100%";
+    txt.textContent = `All ${s.total} games analyzed at depth ${s.depth} — Game Review is now instant.`;
   } else {
-    btn.disabled = false; btn.textContent = "✓ Reviews ready";
-    bar.classList.remove("on");
+    bar.classList.remove("on");          // nothing new to analyze
   }
 }
 
@@ -1608,26 +1597,36 @@ async function prewarmFetch(method) {
   return r.json();                     // an `error` field here is job status, not fatal
 }
 
+const sameUser = (a, b) => (a || "").toLowerCase() === (b || "").toLowerCase();
+
 async function pollPrewarm() {
+  clearTimeout(_pwTimer);
   try {
     const s = await prewarmFetch("GET");
+    // a job for another account is winding down; once it has, start ours
+    if (!sameUser(s.user, currentUser()) || (!s.running && !s.finished)) {
+      if (s.running) _pwTimer = setTimeout(pollPrewarm, 1500);
+      else startPrewarm();
+      return;
+    }
     renderPrewarm(s);
-    clearTimeout(_pwTimer);
     if (s.running) _pwTimer = setTimeout(pollPrewarm, 1500);
-  } catch (e) { /* transient — the next poll will recover */ }
+  } catch (e) {
+    _pwTimer = setTimeout(pollPrewarm, 5000);   // transient — retry
+  }
 }
 
+// analyze every game at review depth in the background, so Game Review opens
+// instantly; games already analyzed are skipped, so this is cheap to repeat
 async function startPrewarm() {
-  const btn = $("prewarm");
-  btn.disabled = true; btn.textContent = "⏳ Starting…";
+  if (!currentUser()) return;
   try {
-    renderPrewarm(await prewarmFetch("POST"));
-    clearTimeout(_pwTimer);
-    pollPrewarm();
+    await prewarmFetch("POST");
   } catch (e) {
-    setStatus("Could not start analysis: " + e.message, true);
-    btn.disabled = false; btn.textContent = "⚡ Prepare reviews";
+    setStatus("Could not start review analysis: " + e.message, true);
+    return;
   }
+  pollPrewarm();
 }
 
 // ----------------------------------------------------------------------- init
@@ -1644,7 +1643,7 @@ async function startPrewarm() {
     setStatus(r.msg || "");
   }
   renderControls();
-  $("prewarm").onclick = startPrewarm;
+  startPrewarm();
   // switching account rebuilds everything: the report on screen belongs to the
   // old one, and the game picker and pre-warm estimate are per-account too
   $("f-user").onchange = async () => {
@@ -1656,9 +1655,8 @@ async function startPrewarm() {
       setStatus(r.msg || "");
     }
     renderControls();
-    pollPrewarm();
+    startPrewarm();
   };
-  pollPrewarm();                       // show the estimate, or resume a running job
   // drill-down: a game row (reasons or drill-table) opens its review, at its
   // move if one is attached; a drill-table parent row toggles its games.
   document.addEventListener("click", (e) => {

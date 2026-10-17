@@ -97,3 +97,40 @@ def isolated_store(tmp_path, monkeypatch):
     store.reset()
     yield store
     store.reset()
+
+
+# --- the opening book, built small ----------------------------------------------
+
+_game_ids = iter(range(10 ** 9))
+
+
+def parsed_game(moves: str, result: str = "1-0", headers: str = ""):
+    """A parsed game with a unique id — book walks are cached by game id."""
+    from chessanalysis.model import parse_pgn_text
+
+    n = next(_game_ids)
+    pgn = (f'[White "w{n}"]\n[Black "b{n}"]\n[Date "2026.01.01"]\n'
+           f'[UTCTime "{n}"]\n[Result "{result}"]\n{headers}\n{moves} {result}\n')
+    return parse_pgn_text(pgn)[0]
+
+
+TINY_BOOK_GAMES = (["1. e4 c5 2. Nc3 Nc6 3. Nf3 *"] * 3
+                   + ["1. e4 e5 2. Nf3 Nc6 3. Bb5 *"] * 3
+                   + ["1. Nf3 Nc6 2. e4 e5 *"] * 3
+                   + ["1. e4 e5 2. Nf3 Qh4 *"])        # once: too rare for the book
+
+
+@pytest.fixture
+def tiny_book(tmp_path, monkeypatch):
+    """A book built by `book.build` itself from a handful of games."""
+    from chessanalysis import book
+
+    pgn = tmp_path / "strong.pgn"
+    pgn.write_text("".join(f'[Event "x"]\n\n{m}\n\n' for m in TINY_BOOK_GAMES))
+    out = tmp_path / "book.tsv.gz"
+    monkeypatch.setattr(book, "MIN_GAMES", 2)
+    book.build([str(pgn)], str(out))
+    monkeypatch.setattr(book, "_BOOK", str(out))
+    loaded = book._book.__wrapped__()
+    monkeypatch.setattr(book, "_book", lambda: loaded)
+    return loaded

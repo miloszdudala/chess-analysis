@@ -18,18 +18,28 @@ refund restores precisely that. Only games that *cost* points are refunded: a
 win or a draw against someone later banned keeps its gain, so those get no
 correction at all.
 
-*When* is model-free too. A loss always lowers your rating and a win always
-raises it, so a loss whose change is >= 0 (or a win whose change is <= 0) is
-arithmetically impossible — the only thing that can produce one is an
-adjustment landing on top of that game. The first such game after the cheated
-one is where the refund arrived. If none is found the refund hasn't landed yet
-and the correction simply runs to the end of the series.
+*When* is read off the curve. Every rating change is the game's own result
+plus whatever adjustment landed on top of it, and the game's share is
+predictable: K * (score - expected), with the expected score from the two
+ratings and K read from the neighbouring games (it's the same for every game
+in a stretch, bar the provisional start). What's left over is the adjustment.
+The first game after the cheated one carrying roughly the lost points extra is
+where the refund arrived — a win worth 17 among wins worth 9, or a loss that
+cost nothing. Without opponent ratings only the second kind is visible: a loss
+whose change is >= 0 (or a win whose change is <= 0) is arithmetically
+impossible, so it can only be an adjustment. If no such game is found the
+refund hasn't landed yet and the correction runs to the end of the series.
 """
 from __future__ import annotations
+
+from statistics import median
 
 # a result whose rating moved the wrong way (or not at all) can only be an
 # adjustment landing on top of the game
 _WRONG_WAY = {"loss": lambda d: d >= 0, "win": lambda d: d <= 0}
+_SCORE = {"win": 1.0, "draw": 0.5, "loss": 0.0}
+_K_WINDOW = 5          # games either side whose K sets a game's expected change
+_MIN_SURPRISE = 0.15   # |score - expected| below this says too little about K
 
 
 def _series(games):
@@ -42,9 +52,49 @@ def _series(games):
     return out
 
 
-def _refund_index(series, start):
-    """Index of the game the refund landed on, or None if it hasn't yet."""
+def _surprise(series, j):
+    """score - expected for game j, or None without an opponent rating."""
+    opp = getattr(series[j], "opp_elo", None)
+    if not opp:
+        return None
+    before = series[j - 1].user_elo
+    expected = 1 / (1 + 10 ** ((opp - before) / 400))
+    return _SCORE[series[j].outcome] - expected
+
+
+def _residuals(series):
+    """Per game, the rating change its result doesn't explain (None where it
+    can't be modelled). K is the median implied by the neighbours, so a
+    refund-carrying game never sets its own yardstick."""
+    delta = [None] + [series[j].user_elo - series[j - 1].user_elo
+                      for j in range(1, len(series))]
+    surprise = [None] + [_surprise(series, j) for j in range(1, len(series))]
+    implied = [delta[j] / surprise[j]
+               if surprise[j] is not None and abs(surprise[j]) >= _MIN_SURPRISE
+               else None for j in range(len(series))]
+    out = []
+    for j in range(len(series)):
+        ks = [implied[i] for i in range(max(1, j - _K_WINDOW),
+                                        min(len(series), j + _K_WINDOW + 1))
+              if i != j and implied[i] is not None]
+        if surprise[j] is None or not ks:
+            out.append(None)
+        else:
+            out.append(delta[j] - median(ks) * surprise[j])
+    return out
+
+
+def _refund_index(series, start, back, left):
+    """Index of the game the refund of `back` points landed on, or None if it
+    hasn't yet. `left` is each game's still-unexplained residual; a claimed
+    refund is taken out of it so two refunds can't both land on one jump."""
+    tol = max(3, 0.4 * back)
     for j in range(start + 1, len(series)):
+        if left[j] is not None:
+            if left[j] >= back - tol:
+                left[j] -= back
+                return j
+            continue
         delta = series[j].user_elo - series[j - 1].user_elo
         impossible = _WRONG_WAY.get(series[j].outcome)
         if impossible and impossible(delta):
@@ -60,6 +110,7 @@ def corrections(games, cheated_ids) -> dict[str, int]:
     """
     fix: dict[str, int] = {}
     for series in _series(games).values():
+        left = _residuals(series)
         for i, g in enumerate(series):
             if i == 0 or str(g.game_id) not in cheated_ids:
                 continue
@@ -67,7 +118,7 @@ def corrections(games, cheated_ids) -> dict[str, int]:
             if lost >= 0:
                 continue                  # a win or draw: the gain is kept
             back = -lost
-            end = _refund_index(series, i)
+            end = _refund_index(series, i, back, left)
             # from the cheated game itself (the refund undoes its own drop too)
             # up to, but not including, the game the refund landed on — from
             # there the points are already back in the recorded rating

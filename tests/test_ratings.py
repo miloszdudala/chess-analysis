@@ -9,12 +9,13 @@ from chessanalysis import ratings
 class FakeGame:
     """Just the fields `ratings` reads: identity, rating, result, format."""
 
-    def __init__(self, gid, elo, outcome, time_class="rapid"):
+    def __init__(self, gid, elo, outcome, time_class="rapid", opp_elo=None):
         self.game_id = gid
         self.user_elo = elo
         self.user_elo_raw = elo
         self.outcome = outcome
         self.time_class = time_class
+        self.opp_elo = opp_elo
 
 
 def series(*rows, time_class="rapid"):
@@ -80,6 +81,22 @@ def test_a_draw_that_cost_points_is_refunded():
     games = series((1970, "win"), (1962, "draw"), (1950, "loss"), (1950, "loss"))
     ratings.apply(games, {"g1"})
     assert elos(games) == [1970, 1970, 1958, 1950]
+
+
+# --- a refund landing on a win ---------------------------------------------
+# A win can't move the wrong way, so here the refund only shows as a win worth
+# more than its neighbours. Evenly matched opponents, K = 16: an honest game is
+# +-8, and the win carrying the 8-point refund is +16.
+
+def test_refund_landing_on_a_win_is_found_by_its_excess():
+    rows = [(2000, "win"), (1992, "loss"), (2000, "win"), (2008, "win"),
+            (2000, "loss"), (2016, "win"), (2024, "win"), (2016, "loss")]
+    games = series(*rows)
+    for prev, g in zip(games, games[1:]):
+        g.opp_elo = prev.user_elo          # an even game: expected score 0.5
+    ratings.apply(games, {"g1"})
+    # corrected up to the refund game only — the present rating is untouched
+    assert elos(games) == [2000, 2000, 2008, 2016, 2008, 2016, 2024, 2016]
 
 
 # --- edges -----------------------------------------------------------------

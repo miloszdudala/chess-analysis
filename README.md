@@ -1,195 +1,220 @@
-# chess-analyzer
+# Chess Analyzer 2.0
 
-Scrape your Chess.com games and generate analysis reports — a full
-game-history overview, a deep **engine review** of a single game (Stockfish),
-and player **comparison**. Built around a pluggable architecture: new stats,
-new modes, and new charts each drop in as a single file.
+Your Chess.com games, analysed by Stockfish and read three ways: **what is
+true** about your play compared with players at your rating, measured on equal
+terms; **what happened** in each game; and **what to practise**, drawn from
+the positions you actually got wrong.
 
 ## Setup
 
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt        # python-chess, flask
-brew install stockfish                            # engine for game review
+brew install stockfish                            # the engine
 
 cp .env.example .env                              # optional: a default username
 ```
 
-`.env` (gitignored) holds `CHESS_USERNAME`, `CHESS_DB`, `REPORT_FILE`,
-`STOCKFISH_PATH`, `ENGINE_DEPTH`. `CHESS_USERNAME` only pre-fills the web app's
-username box — type any account there to analyse it.
+`.env` (gitignored) holds `CHESS_USERNAME`, `CHESS_DB`, `STOCKFISH_PATH`,
+`ENGINE_DEPTH`, `RECENT_DEPTH`, `CORPUS_WORKERS`, `DECISIVE_CP`.
 
-## Run the web app
+## Run it
 
-**One click — no terminal.** Launch **Chess Analyzer** from the Dock,
-Launchpad or Spotlight (the app lives in `~/Applications`; drag it to the Dock
-once to keep it there). It restarts the server and opens the browser for you,
-so code edits are always picked up. `Chess Analyzer.command` in this folder
-does the same thing from Finder.
-
-Both are thin wrappers around one script:
+Launch **Chess Analyzer** from the Dock, Launchpad or Spotlight, or
+double-click `Chess Analyzer.command` in this folder. Either restarts the server
+and opens the browser, so code changes are always picked up.
 
 ```bash
 bin/chess-analyzer            # start (restarting any old server) and open the browser
-bin/chess-analyzer --stop     # stop the server
-PORT=8080 bin/chess-analyzer  # a different port
+bin/chess-analyzer --stop     # stop it
+PORT=8080 bin/chess-analyzer  # another port
+.venv/bin/python webapp.py    # the long way: http://127.0.0.1:5050
 ```
 
-Server output goes to `data/webapp.log`. Or run it the long way:
+Type a Chess.com account in the top-right box and every page reports on it; the
+format selector beside it (rapid by default) chooses which games. Opening the
+app syncs the account from Chess.com, then a background job analyses any game
+not yet analysed — first quickly, for the peer comparison, then at review depth.
+A thin bar under the header shows its progress.
+
+> **First launch of the Dock app** asks for access to the Documents folder —
+> click **Allow**. If you miss it: `tccutil reset SystemPolicyDocumentsFolder
+> local.chessanalyzer.launcher` and launch again. The app bundle is a launcher
+> only; rebuild it with `bin/make-app`.
+
+## The pages
+
+Every page has an address (`#/train?kind=missed`, `#/game/<id>?ply=24`), so the
+back button works and any report can link straight to a view. Light and dark
+themes follow the system; ◐ switches by hand.
+
+**Overview** — where you stand. Rating, form (FIDE performance over your last 20
+games), what your moves play like, today's training, and the coach: you against
+players at your rating, phase by phase, situation by situation, clock by clock.
+How that comparison is made is the next section.
+
+**Games** — your whole history, newest first, filterable by result, colour,
+opening and the one-line reason the game was won or lost. Each row opens its
+review.
+
+**Game review** — why you won or lost (a correctable verdict), the board with
+the engine's candidate moves drawn as arrows, clocks as they stood, and the
+evaluation graph with the middlegame and endgame marked. Play any move on the
+board to explore it with the live engine. Then the game in numbers — accuracy,
+accuracy per phase, where you left book — and its key moments, each a jump to
+that move. ← → step through the game; F flips the board.
+
+**Openings** — an explorer over three sources at once: your games (your score
+after each move, the engine's verdict, and what your own move costs on
+average), players rated near you, and 280,000 games between 2500+ and 2300+
+players. Positions are keyed so transpositions meet. Play on the board or click
+a move; moves you keep making that cost 5% or more are highlighted.
+
+**Train** — positions from your own games, until they stick. Three kinds: your
+mistakes (a move that cost 12% or more of your win chance), missed chances (your
+opponent handed you 15% and your reply gave it back) and opening fixes (a costly
+move you made in the same opening position more than once). Any move within 5%
+of the engine's best solves it — not only the one the engine listed first — and
+moves the stored analysis never considered are judged by the live engine. Solved
+first time, a position returns after a day, then three, then at a growing
+interval; missed, it returns within the session. The labels on a position are
+only what the engine proves: a forced mate, a single good move, the phase,
+whether you were converting or defending.
+
+**Stats** — the descriptive record: results by colour and opponent strength,
+form over time, the clock, why your games end the way they do, your progress
+against your own baseline, and the opponent-paired phase comparison.
+
+**Peers** — the rating corpus, at two scopes. *My band* sets you against the
+players at your rating; *every band* shows what changes as rating rises. On
+the corpus, middlegame blunders per 100 moves fall from 4.4 at 1800 to 2.6 at
+2200, against 1.0 → 0.4 in the opening and 2.7 → 2.1 in the endgame, and games
+are decided later — around move 15 at 1800, 19 at 2100 — with the share
+settled in the opening falling from 31% to 19%. The opening section measures
+openings in win chance rather than results, and *what the opening is worth*
+compares each player with themselves. **⊕ Expand the corpus** downloads and
+analyses more games, filling the thinnest band first.
+
+**Scout** — name an opponent: their recent games are downloaded and read for
+preparation, without the engine, so it takes seconds. What they open with as
+White and answer as Black — each line beside your own record in it — their
+openings by name, how their games end, how they use the clock against players
+at their rating, and your games against them. Their repertoire opens in the
+explorer.
+
+## How the comparison is made
+
+The coach measures one thing: the win chance each of your moves gives away,
+per move — the quantity Lichess accuracy is built from. It is split three ways
+(phase, situation, clock), plus your replies to an opponent's mistake.
+
+- **Same terms.** Your games and the corpus are analysed by the same engine at
+  the same depth, in the same 10-minute time control.
+- **Rating-matched.** Each of your games is set against corpus players at the
+  rating you had *in that game*: a player who climbed 400 points would
+  otherwise have their early games judged against their current band.
+- **A control.** Your opponents in the same games are measured the same way,
+  against players at their rating. Anything both sides of your games share and
+  the corpus does not — the pool you play in, game length, the kind of position —
+  moves the control, and the verdict is drawn on your gap with the control taken
+  out. Without it, a "time trouble leak" of +60% appears that your opponents
+  share in full (+71%).
+- **Intervals.** A paired bootstrap over your games. A bucket is a leak or a
+  strength only when its 95% interval clears zero; otherwise the page says
+  which way it leans and that more games will tell.
+- **Results are not compared.** Inside a band everyone scores about 50%, so
+  being better at one thing means being worse at another; points lost are
+  measured directly, where that compensation cannot hide.
+
+*Your moves play like* reads your control-adjusted loss per move off the
+corpus ladder (which falls steadily, 3.7 at 1700 to 2.8 at 2200) and says so
+when you are beyond the bands the corpus covers, rather than extrapolating.
+
+## Phases
+
+Opening, middlegame and endgame follow Lichess's Divider
+(`chessanalysis/phases.py`), not the move number: the middlegame starts with
+development, a thinned back rank or interlocked armies; the endgame when six or
+fewer pieces besides kings and pawns remain. A move belongs to the phase of the
+position it was played from. Every statistic uses this one definition. On the
+corpus the middlegame starts at a median of move 11 and the endgame at move 26;
+31% of games never reach one.
+
+## Where the data lives
+
+Everything is one SQLite file, `data/chess.db`: every game's PGN (yours, the
+corpus's, scouted opponents'), every engine analysis keyed by game and depth,
+the corpus samples, your training schedule, your corrections and flags, and
+small state such as fair-play statuses. Upgrading from 1.x imports the old
+`data/cache/` and `data/overrides.json` once, on first start.
+
+### Games that don't count
+
+Two kinds of game leave every statistic while staying in the history, marked ⚑:
+**anomalous** ones you flag in the review (a disconnect, a thrown game), and
+games against an opponent **Chess.com has since banned for fair play** —
+detected automatically on sync, with recent opponents re-checked twice a day.
+Chess.com refunds the rating such a game cost, days later; `ratings.py` adds
+the points back over exactly that stretch so the curve stays continuous.
+
+## The command line
 
 ```bash
-.venv/bin/python webapp.py         # then open http://127.0.0.1:5050
-pkill -f webapp.py                 # stop it
+.venv/bin/python analyze.py                  # the coach, in the terminal
+.venv/bin/python analyze.py coach --last 30  # ...over your latest 30 games
+.venv/bin/python analyze.py train            # refresh training positions, show the queue
+.venv/bin/python analyze.py player           # the full report  -> out/player-<user>.json
+.venv/bin/python analyze.py game last        # one game's review -> out/game-<id>.json
+.venv/bin/python analyze.py scout <account>  # an opponent       -> out/scout-<account>.json
+.venv/bin/python scraper.py <account>        # download games without the app
+.venv/bin/python -m chessanalysis.corpus.analyse rebuild   # re-derive corpus samples
 ```
-
-Type a Chess.com account in the **Username** box in the header and every tab
-reports on it — there is no separate download step. An account is synced when
-the page opens and again whenever you switch to one not yet pulled this
-session; pressing **Show** twice cannot have produced new games, so it does not
-re-sync. Reload the page to force a fresh pull. `python3 scraper.py` still
-downloads games from the terminal if you want it.
-
-> **First launch of the Dock app** shows *"Chess Analyzer would like to access
-> files in your Documents folder"* — click **Allow**. macOS blocks apps from
-> reading `~/Documents` until you do, and this project lives there. If you miss
-> the prompt, macOS won't ask twice: reset it with
-> `tccutil reset SystemPolicyDocumentsFolder local.chessanalyzer.launcher` and
-> launch again, or tick **Chess Analyzer** under System Settings → Privacy &
-> Security → Files and Folders. The `.command` file needs no permission — it
-> runs through Terminal, which already has access.
->
-> The app bundle is a launcher only; rebuild it with `bin/make-app`.
-
-In the browser, pick a tab:
-
-- **Player report** — choose a format (bullet / blitz / rapid) first, then pick
-  which stats to show. Includes a zoomable rating chart (drag/scroll to zoom,
-  double-click to reset, hover for date / rating / change; Game / Day / Month
-  grouping), opening **move trees** per color, opponent-strength aggregates, and
-  a **Recent games** list (5 / 10 / 20 / All) — each engine-analysed with
-  accuracy, blunders, and the conversion stat; click a row to open its review.
-- **Game review** — pick a game and depth; Stockfish reports accuracy, an eval
-  graph, annotated key moments, and the **conversion** stat (when the eval first
-  crossed ±X and whether it held).
-- **Brackets** — the rating corpus, at two scopes. *My band* puts you against
-  the players actually at your rating, measured in the same currency (their
-  games run through the same engine at the same depth as yours); *Every band*
-  is the ladder. Both lead with the opening / middlegame / endgame split, which
-  is where the diagnosis lives — across 1800–2200 the opening barely moves and
-  the endgame is flat, while middlegame blunders per 100 moves halve. Games
-  also get decided later as rating rises: average move 16 at 1800, 19 at 2100,
-  with the share settled in the opening falling from 38% to 23%.
-  **The opening** is measured without comparing results, since inside a band
-  everyone scores about 50% and better openings have to be paid for elsewhere.
-  Instead: the engine's win chance you give away on moves 1–12, what your
-  openings get out of opponents, the net, and the clock; theory depth against
-  a book of 280,000 games between 2500+ and 2300+ players (the Lichess Elite
-  Database, CC0), counted only while the opponent is still in book; and the
-  real spread between players at one rating, with ten-game luck taken out. Your
-  repertoire to move 10 is read from the moves you choose, compared between
-  games where the opponent began the same way. *What the opening is worth*
-  compares each corpus player with themselves: knowing the line longer than
-  the opponent is worth about two points at move 12, and does not carry into
-  the middlegame.
-  **⊕ Expand database** fetches more games and analyses them in the
-  background, filling the thinnest band first.
-- **Compare** — two players side by side.
-
-### Where the data lives
-
-Everything is one SQLite file, `data/chess.db`: the PGN of every game (yours
-and, for the rating-bracket work, other players'), and every engine analysis
-ever computed, keyed by game and depth. Loading a player's games is an indexed
-lookup rather than a parse of every game on disk, de-duplication is a primary
-key, and tens of thousands of games cost neither tens of thousands of inodes
-nor an `os.listdir` per lookup.
-
-### Syncing, and games that don't count
-
-The page syncs on load, so the games on screen are current without a separate
-download step. That stays cheap: past months are recorded in a manifest and
-never re-fetched, only the current month is re-read, and the server skips a
-repeat sync of the same account inside a minute in any case. Games are read from the archive's `/pgn` feed rather than its
-JSON twin — the JSON one is served from a cache that lags an hour behind, so
-games played today are missing from it.
-
-Two kinds of game are left out of every statistic while staying visible in the
-history, marked ⚑:
-
-- **Anomalous** — a disconnect, a game thrown on purpose. You tick this yourself
-  in the game's review.
-- **Opponent banned for fair play** — detected automatically. Chess.com
-  publishes an account's standing, so opponents are checked on sync and games
-  against a closed account are dropped. How often a clean status is re-checked
-  depends on how recently you played them: an account closes days to weeks
-  after the games that closed it, so opponents from the last 45 days are
-  re-checked twice a day and older ones weekly. Chess.com refunds the rating such a game
-  cost you, but days later, which leaves a dip and then a jump in the rating
-  curve; `ratings.py` adds the points back over exactly that stretch so the
-  curve is continuous. A win or draw against someone later banned keeps its
-  gain, so it gets no correction.
-
-## CLI (static HTML + JSON)
-
-The same reports can be generated as static files without the server:
-
-```bash
-.venv/bin/python analyze.py                       # player report (all formats)
-.venv/bin/python analyze.py game last             # engine review, most recent game
-.venv/bin/python analyze.py game mainc4tur        # last game vs an opponent
-.venv/bin/python analyze.py compare me rival      # two players side by side
-```
-
-Each run writes both `<name>.html` and `<name>.json` (the same Document the web
-app consumes). Engine analysis is kept in the store, so re-runs are instant.
 
 ## Architecture
 
 ```
-scraper.py                 Chess.com scraper (username only)
-analyze.py                 CLI: pick a mode → build a Document → write HTML + JSON
-webapp.py                  Flask app: serves the same Documents over /api/<mode>
-frontend/                  index.html + app.js: mode picker, JS widget renderer,
-                           interactive rating chart
+webapp.py                  Flask: thin JSON endpoints over chessanalysis
+analyze.py                 the CLI
+scraper.py                 Chess.com downloader (own / scouted accounts)
+frontend/
+├── index.html, style.css  the shell and one stylesheet (light + dark)
+└── js/                    ES modules, no build step: router, board, charts,
+                           widget renderers, one module per page
 chessanalysis/
-├── store.py               data/chess.db — every game and every engine analysis
-├── corpus/                rating-bracket corpus: SQL aggregates, crawler,
-│                          sharded depth-10 engine pass (2 samples per game)
-├── model.py               PGN → perspective-bound Game objects (+ parsed moves, clocks)
-├── fairplay.py            opponents Chess.com closed for cheating (cached lookups)
-├── ratings.py             rebases the rating curve around a refunded cheated game
-├── book.py                opening theory: the elite-games book and opening names
-├── opening.py             opening strength, repertoire and their statistics
-├── contexts.py            per-mode input shapes (Player / Game / Compare)
-├── enrich/engine.py       Stockfish per-move evals, accuracy, blunder detection (cached)
-├── registry.py            @metric decorator; metrics tagged by scope
-├── metrics/               compute-only units → widget data (auto-discovered)
-│   ├── player/  game/  compare/
-├── widgets.py             widget vocabulary = backend↔frontend data contract
-├── document.py            a mode's output: ordered widgets + metadata → JSON
-├── modes/                 build context → run scope's metrics → assemble Document
-└── render_html.py         default renderer: Document → static HTML (incl. SVG)
+├── store.py               data/chess.db — the one place anything is kept
+├── model.py               PGN -> perspective-bound Game objects
+├── phases.py              opening / middlegame / endgame (Lichess's Divider)
+├── enrich/engine.py       Stockfish per-move evals, Lichess accuracy
+├── livengine.py           one long-lived engine for interactive questions
+├── jobs.py                background jobs with pollable progress
+├── coach.py               win chance lost, against rating-matched peers
+├── training.py            positions to solve, judging, spaced repetition
+├── explorer.py            the opening explorer's position indexes
+├── gamelist.py            the history, with what is known about each game
+├── book.py, opening.py    opening theory and the opening research
+├── corpus/                the rating corpus: crawler, engine pass, SQL aggregates
+├── diagnosis.py, insights.py, weaknesses.py, form.py, clocks.py
+├── fairplay.py, ratings.py, overrides.py
+├── registry.py, contexts.py, document.py, widgets.py
+├── metrics/               compute-only units, by scope (auto-discovered)
+│   └── overview/  player/  game/  brackets/  scout/
+└── modes/                 overview, player, game, brackets, scout
 ```
 
-## Three ways to extend — each is one file
+### Extending — each is one file
 
-**A new stat** — drop a file in `metrics/<scope>/`:
-
-```python
-from ...registry import metric
-from ... import widgets as W
-from ...util import tally, wdl_rows
-
-@metric("player", title="By time control", order=30)
-def by_time_control(ctx):
-    return W.wdl_table("Format", wdl_rows(tally(ctx.games, lambda g: g.time_class)))
-```
-
-**A new mode** — add a `modes/` file with `@mode("name")` and a context type;
-it reuses every metric of that scope.
-
-**A new chart** — add a builder to `widgets.py` and a handler in
-`render_html.py` (and, later, a frontend component).
+**A stat** — a file in `metrics/<scope>/` with an `@metric` function returning
+widgets from `widgets.py`. **A mode** — a `modes/` file with `@mode("name")`
+and a context; it runs every metric of its scope. **A chart** — a builder in
+`widgets.py` and a renderer in `frontend/js/widgets.js`.
 
 The discipline that keeps it easy: **metrics compute, modes shape data,
-renderers render** — never the other way around.
+renderers render.**
+
+## Credits
+
+Pieces: the *cburnett* set by Colin M.L. Burnett (GPLv2+ / BSD / CC BY-SA 3.0),
+as served by Lichess. The phase split and the accuracy formula follow Lichess
+(scalachess `Divider`, lichess.org/page/accuracy). Opening names: the Lichess
+openings catalogue (CC0). The theory book is cut from the Lichess Elite Database
+(database.nikonoel.fr, CC0).

@@ -2,112 +2,61 @@
 
 Things worth doing, with enough context to pick up cold.
 
-## 1. Compare is still scaffolding
+## Done in 2.0
 
-`modes/comparison.py` and `metrics/compare/basics.py` are close to the stub they
-started as: one card row (win rate, peak Elo) and little else. The architecture
-is there — `CompareContext` carries both cohorts plus their head-to-head games,
-and any `@metric("compare")` file is picked up automatically — but almost
-nothing uses it.
+- **Phases by position, in one place.** `phases.py` is Lichess's Divider and
+  every statistic imports it; corpus samples record where each game's
+  middlegame and endgame begin, and were re-derived without the engine
+  (`ensure_samples`). The ladder held: middlegame blunders per 100 moves fall
+  4.15 → 2.52 (1800 → 2200) under the move-number split and 4.38 → 2.56 under
+  the Divider, so that finding is about chess, not about move 32. What moved
+  was the endgame (flat before, a mild decline now) and how early games are
+  decided in the opening (38% → 23% before, 31% → 13% now: the Divider's
+  opening ends sooner for stronger players). The endgame threshold is Lichess's
+  (six or fewer minor and major pieces) — inherited, but from a published
+  definition that matches the accuracy formula's source.
+- **Compare became Scout.** Engine-free, so it is instant on any account; the
+  "progress UI for analysing someone's whole history" problem went away with
+  the engine. Head-to-head is shown as the record it is, without inference.
 
-What it should probably become, now that the Brackets work exists: the same
-two-column shape, pointed at a named opponent instead of a rating band. Most of
-that machinery already exists and is not compare-specific —
-`metrics/brackets/compare.py` tallies two populations through the report's own
-classifiers and prints a gap column. Worth reusing rather than rewriting.
+## 1. Blunder anatomy, still open
 
-Open questions before building:
-- Compare syncs and analyses the other player's whole history. At review depth
-  that is ~30s a game. It needs the corpus-depth path (`corpus.analyse_own`
-  generalised to any account) and a progress UI, or it will just hang.
-- Head-to-head is usually a handful of games. Decide what is honestly sayable
-  from five games, and what has to fall back to comparing the two full
-  histories instead.
+Unchanged in substance — see the comment in `weaknesses.py`. The training
+positions (`training.py`) now carry only labels the engine proves: forced mate,
+an only move (the second-best is 15%+ worse), the phase, converting or
+defending. The next step is the same as before: store the refutation's
+principal variation (the corpus pass already records the first move; the review
+pass keeps three candidates but no lines) and classify from the line, then
+audit a sample against exchange evaluation before showing a single label.
 
-## 2. Blunder anatomy, revisited
+## 2. The corpus ends at 2300
 
-Removed in the commit that added this file — see the comment left in
-`weaknesses.py` where it used to live. It grouped blunders by the tactic the
-engine's refutation exploited, and measured against static exchange evaluation
-its largest bucket ("Lost material to a capture") was **45% wrong**: it asked
-only whether the captured square was defended, never whether the capture won
-anything, so an even trade and a won piece looked identical to it.
+`coach.plays_like` reads your loss per move off the ladder, and the corpus has
+almost nothing above 2200 (12 samples at 2300). For an account at 2094 whose
+moves look like 2200 or better, the upper end of the range is "2300+" because
+there is nothing to read it against. `crawl.plan` targets two bands either side
+of your rating; widening it upward when `plays_like` lands near the top band
+would fix this. The ladder also needs ≥3000 moves per band to be used.
 
-A rebuild got the material claims right — exchange evaluation, played out
-cheapest-attacker-first, so "hung a piece" means the refutation nets a minor
-piece or more, and a fork has to *win* on two squares rather than merely attack
-them. That part is sound and is worth recovering from git history
-(`git log -S _see -- chessanalysis/weaknesses.py`).
+## 3. Only 10-minute games have peers
 
-What stopped it being shippable is the rest of the taxonomy. Pins, discovered
-attacks, deflection, an overloaded defender, a king that has quietly become
-unsafe — these are the motifs actually worth naming to a player, and none of
-them follow from the position by any arrangement of if-statements. Roughly 43%
-of blunders landed in "positional / other", which is honest but not useful.
+The corpus is 600-second rapid. The coach states this and stays silent for
+blitz or bullet, but a player who mostly plays blitz gets no peer comparison.
+`crawl.py` filters on `TIME_CONTROL`; a per-format corpus means a `time_control`
+column in every corpus query (most already join `games`, which has it).
 
-Ideas, in rough order of appeal:
-- Ship only what is provable — mate, material by exchange evaluation, check —
-  and name the remainder plainly ("the evaluation collapsed, no immediate
-  tactic") rather than implying a taxonomy that is not there.
-- Ask the engine instead of a rule: the refutation's principal variation says
-  what happens next, and a pin or a deflection is visible in the line even when
-  it is invisible in the position. Needs the PV stored, not just the first move.
-- Accept that motif naming is a model's job, not a rule's.
+## 4. Multi-move training positions
 
-Whatever the approach: the audit that caught this is the deliverable. Classify a
-sample, then check each label against something independent (exchange evaluation
-for material claims), and report the disagreement rate. A classifier nobody has
-measured is a classifier nobody should trust.
+A position is one move today: find the move that keeps the win chance. Where
+the engine's line is forcing (an only move, then another), the trainer could
+play the opponent's reply and ask again — `livengine.analyse(..., pv_len=...)`
+already returns the line, and `training.attempt` judges any move. The open
+question is when a line stops being forcing enough to keep asking.
 
-## 3. A better opening / middlegame / endgame split
+## 5. Coach: frequency is shown, not tested
 
-Today the split is nothing but the move number:
-
-```python
-def _phase(move_no):
-    if move_no <= 12:  return "Opening"
-    if move_no <= 32:  return "Middlegame"
-    return "Endgame"
-```
-
-It is copied verbatim into three files — `insights.py`, `weaknesses.py` and
-`corpus/analyse.py` — which is its own small problem: any change has to be made
-three times, and the corpus one is baked into every stored sample row.
-
-This matters more than it looks, because the phase split is now carrying most
-of the signal on the Brackets tab. "Middlegame blunders halve from 1800 to
-2100" is the headline finding there, and it rests on a definition of
-middlegame that is just "moves 13 to 32".
-
-### What the data says
-
-`corpus/analyse.py` already computes and stores `eg_ply` — the first ply at
-which non-pawn material for both sides together drops to 13 or less — on every
-analysis. Nothing reads it. Across 1130 analysed games:
-
-- **71% never reach a material endgame at all**, yet every one of them has its
-  moves past 32 labelled "Endgame". That bucket is mostly late middlegame.
-- Of the 29% that do, it begins at median move 38, 10th percentile 28, 90th
-  percentile 52.
-- 37% of those differ from move 33 by more than eight moves.
-
-Caveat on that 71%: a combined threshold of 13 is strict — rook and bishop each
-side is 16 and would not count — so the number reflects the threshold as much
-as the games. The threshold is itself a parameter worth choosing deliberately
-rather than inheriting.
-
-### Directions
-
-- Define the endgame by material, not by move number, and pick the threshold
-  with evidence. Queens-off is the other common rule and is easy to compute.
-- The opening boundary is a different question entirely: it wants "when did the
-  players leave known theory", not a move count. `opening_leaks` already works
-  on repeated positions, and an ECO code is in every PGN header, so first
-  deviation from a book line is reachable without an opening database.
-- Whatever is chosen, put it in **one** place and have the other two import it.
-- Re-deriving the corpus does not need the engine: the phase aggregates in
-  `samples` come from the eval array plus the PGN, both of which are stored.
-  See `corpus._rehydrate`. Recomputing the split is a backfill, not a re-analysis.
-- Before shipping it, check the ladder still holds. If "middlegame blunders
-  halve across 400 Elo" survives a material-based boundary, it is a fact about
-  chess; if it moves a lot, it was partly a fact about move 32.
+Each coach bucket compares how *well* you play there (loss per move), and shows
+how *often* you are there (moves per game) beside the peers' figure without an
+interval. Being behind half as often as your peers is a real strength, and it
+gets no verdict. It needs its own control — your "behind" is your opponent's
+"ahead", so the opponent-paired control does not transfer as it is.

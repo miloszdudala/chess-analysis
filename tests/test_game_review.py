@@ -1,16 +1,12 @@
 """The game-review metrics, especially the interactive board explorer."""
 from __future__ import annotations
 
-import types
-
 import chess
 
 from chessanalysis.contexts import GameContext
 from chessanalysis.enrich import engine as eng
-from chessanalysis.enrich.engine import GameAnalysis, MoveEval
 from chessanalysis.metrics.game.review import (
-    _drift_runs, _quality_counts, board_explorer, conversion, depth_delta,
-    error_profile, eval_graph, move_quality, summary,
+    _quality_counts, board_explorer, eval_graph, key_moments, move_quality, summary,
 )
 
 from .conftest import FakeGame, build_raw
@@ -60,17 +56,26 @@ def test_board_explorer_none_when_no_positions():
     assert board_explorer(_ctx(empty)) is None
 
 
-def test_summary(sample_analysis):
-    cards = summary(_ctx(sample_analysis))
-    assert cards["type"] == "cards" and len(cards["items"]) == 7
+def test_board_explorer_carries_the_phases(sample_analysis):
+    w = board_explorer(_ctx(sample_analysis))
+    assert set(w["division"]) == {"mid", "end", "plies"}
+    assert w["division"]["plies"] == len(sample_analysis.moves)
+
+
+def test_summary_cards_table_and_note(sample_analysis):
+    cards, table, note = summary(_ctx(sample_analysis))
+    assert cards["type"] == "cards"
     labels = [c["label"] for c in cards["items"]]
-    assert "White top-3 match" in labels and "Black top-3 match" in labels
+    assert "White accuracy" in labels and "Black accuracy" in labels
+    assert any(lbl.startswith("Decisive") for lbl in labels)
+    assert [r[0] for r in table["rows"]] == ["White", "Black"]
+    assert table["columns"][4:7] == ["Opening", "Middlegame", "Endgame"]
+    assert note["type"] == "text"
 
 
-def test_move_quality_chart_then_table(sample_analysis):
-    chart, table = move_quality(_ctx(sample_analysis))
+def test_move_quality_chart(sample_analysis):
+    chart = move_quality(_ctx(sample_analysis))
     assert chart["type"] == "barstack"
-    assert table["type"] == "table" and [r[0] for r in table["rows"]] == ["White", "Black"]
     # the chart's white bar must sum to white's move count
     rows = {r["label"]: r for r in chart["rows"]}
     wsum = sum(s["value"] for s in rows["White"]["segments"])
@@ -83,40 +88,12 @@ def test_quality_counts(sample_analysis):
     assert sum(c.values()) == 2                    # black made two moves
 
 
-def test_drift_runs():
-    mk = lambda cp: types.SimpleNamespace(cp_loss=cp, ply=1, color="white")
-    assert len(_drift_runs([mk(35), mk(40), mk(50), mk(60)])) == 1
-    # a big swing breaks the run; only the trailing 4-long run survives
-    runs = _drift_runs([mk(35), mk(40), mk(200), mk(40), mk(50), mk(60), mk(70)])
-    assert len(runs) == 1 and len(runs[0]) == 4
-    assert _drift_runs([mk(35), mk(40), mk(50)]) == []        # below DRIFT_MIN
-    # moves losing under 30cp are now too small to count as drift
-    assert _drift_runs([mk(20), mk(25), mk(28), mk(20)]) == []
-
-
-def test_error_profile_flags_tactical_miss(sample_analysis):
-    explain, table, note = error_profile(_ctx(sample_analysis))
-    assert explain["type"] == "text" and note["type"] == "text"
-    by_side = {r[0]: r for r in table["rows"]}
-    assert by_side["Black"][1] >= 1               # the 570cp drop is a tactical miss
-
-
-def test_depth_delta_flags_shallow_only_moves(monkeypatch):
-    def m(ply, color, label, san="x"):
-        return MoveEval(ply=ply, color=color, san=san, best_san="", cp_loss=0,
-                        wp_loss=0.0, accuracy=100.0, label=label, fen_before="", move_uci="")
-    # high (review) depth flags white's Qh5 as a blunder; the shallow pass calls it ok
-    hi = GameAnalysis(depth=18, engine_name="x", evals=[0] * 4,
-                      moves=[m(1, "white", "blunder", "Qh5"), m(2, "black", "ok"),
-                             m(3, "white", "ok")])
-    lo = GameAnalysis(depth=12, engine_name="x", evals=[0] * 4,
-                      moves=[m(1, "white", "ok", "Qh5"), m(2, "black", "ok"),
-                             m(3, "white", "ok")])
-    monkeypatch.setattr(eng, "analyse_game", lambda game, depth: lo)
-    explain, table, note = depth_delta(
-        GameContext(game=FakeGame(color="white"), analysis=hi, player="me"))
-    assert table["rows"][0] == ["White", 1]       # one shallow-only error for white
-    assert "Qh5" in note["body"]
+def test_key_moments_jump_to_their_ply(sample_analysis):
+    out = key_moments(_ctx(sample_analysis))
+    moments = out[0]
+    assert moments["type"] == "moments"
+    item = moments["items"][0]
+    assert item["kind"] == "blunder" and item["ply"] == 4 and not item["mine"]
 
 
 def test_eval_graph_plies_align(sample_analysis):
@@ -125,8 +102,4 @@ def test_eval_graph_plies_align(sample_analysis):
     # one ply entry per position; SAN list aligned to the moves
     assert len(w["plies"]) == len(sample_analysis.evals)
     assert len(w["moves"]) == len(sample_analysis.moves)
-
-
-def test_conversion_metric_returns_cards(sample_analysis):
-    w = conversion(_ctx(sample_analysis))
-    assert w["type"] == "cards"
+    assert "division" in w

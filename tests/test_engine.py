@@ -169,3 +169,14 @@ def test_analysis_without_top_moves_recomputes(monkeypatch):
     # it must be bypassed -> tries to open the engine -> our sentinel
     with pytest.raises(Sentinel):
         eng.analyse_game(g, depth=12)
+
+
+def test_centipawn_loss_caps_mate_scores():
+    """A forced mate traded for a won position is not 9000cp of 'loss' (the
+    Lichess cap); win%, and so accuracy, is unaffected."""
+    from .conftest import build_raw
+
+    raw = build_raw(["e2e4", "e7e5", "g1f3"], [eng.MATE_CP - 3, 0, 500, 0])
+    a = eng._derive(raw, depth=12, engine_name="t")
+    assert a.moves[0].cp_loss == eng.CP_CAP          # 1000 -> 0, not 9997 -> 0
+    assert a.moves[0].label == "blunder"

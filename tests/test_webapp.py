@@ -32,18 +32,20 @@ def test_games_endpoint_returns_list(client):
             assert key in g
 
 
-def test_compare_requires_two_players(client):
-    r = client.get("/api/compare?a=onlyone")
+def test_scout_requires_an_account(client):
+    r = client.get("/api/scout?opp=")
     assert r.status_code == 400
     assert "error" in r.get_json()
 
 
-def test_index_and_stylesheet(client):
+def test_index_stylesheet_and_modules(client):
     assert client.get("/").status_code == 200
     css = client.get("/style.css")
     assert css.status_code == 200
     assert "text/css" in css.content_type
-    assert ".rv-svg" in css.get_data(as_text=True)
+    assert ".gapchart" in css.get_data(as_text=True)
+    js = client.get("/js/main.js")
+    assert js.status_code == 200 and "javascript" in js.content_type
 
 
 def test_flag_endpoint_round_trip(client, tmp_path, monkeypatch):
@@ -68,14 +70,15 @@ def test_flag_endpoint_rejects_bad_input(client, tmp_path, monkeypatch):
 def test_games_endpoint_marks_flagged(client, tmp_path, monkeypatch):
     from chessanalysis import overrides
 
-    games = client.get("/api/games").get_json()
-    if not games:
-        pytest.skip("no local PGN library")
+    from .conftest import GAME_SANS, store_game
+
+    store_game("tester", "rival", 2000, 2000, GAME_SANS, source="own")
+    games = client.get("/api/games?user=tester").get_json()
     gid = games[0]["id"]
-    assert "flag" not in games[0]
+    assert "flag" not in games[0] and games[0]["opening"]
 
     overrides.set_flag(gid, "anomaly", "opponent left")
-    after = client.get("/api/games").get_json()
+    after = client.get("/api/games?user=tester").get_json()
     row = next(g for g in after if g["id"] == gid)
     assert row["flag"] == "anomaly" and row["note"] == "opponent left"
     assert len(after) == len(games)          # still listed in the history
@@ -141,3 +144,27 @@ def test_game_review_follows_the_requested_account(client):
     r = client.get("/api/game?user=__no_such_player__&selector=last")
     assert r.status_code == 400
     assert "__no_such_player__" in r.get_json()["error"]
+
+
+# --- 2.0 endpoints ----------------------------------------------------------
+
+def test_training_summary_and_queue_for_an_empty_account(client):
+    s = client.get("/api/train/summary?user=nobody").get_json()
+    assert s["total"] == 0 and set(s["by_kind"]) == {"mistake", "missed", "opening"}
+    d = client.get("/api/train/next?user=nobody").get_json()
+    assert d["puzzle"] is None and d["summary"]["total"] == 0
+
+
+def test_explorer_starts_from_the_initial_position(client):
+    d = client.get("/api/explorer?user=nobody&color=white").get_json()
+    assert d["fen"].startswith("rnbqkbnr/pppppppp") and d["your_move"]
+    assert client.get("/api/explorer?user=nobody&color=green").status_code == 400
+
+
+def test_analysis_job_status_without_games(client):
+    d = client.get("/api/job/analysis?user=nobody").get_json()
+    assert d["running"] is False and d["total"] == 0
+
+
+def test_unknown_format_is_rejected(client):
+    assert client.get("/api/games?user=x&format=hyperbullet").status_code == 400

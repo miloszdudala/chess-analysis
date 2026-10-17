@@ -1,8 +1,8 @@
 """Widget vocabulary — the backend↔frontend data contract.
 
 Every metric returns one of these JSON-serializable dicts (or a list of them).
-A renderer (render_html.py today, a JS frontend tomorrow) maps `type` -> view.
-Adding a chart type = add a builder here + one renderer; nothing else changes.
+The frontend (frontend/js/widgets.js) maps `type` -> view. Adding a chart
+type = add a builder here + one renderer there; nothing else changes.
 
 Widgets are deliberately multi-series from the start so comparison mode is just
 "more series in the same widget" — no new widget types needed.
@@ -25,11 +25,6 @@ def card(value, label, sub=None) -> dict:
 def table(columns: list[str], rows: list[list]) -> dict:
     """Generic table. A cell may be a value or {"bar":[w,d,l]} for a W/D/L bar."""
     return {"type": "table", "columns": columns, "rows": rows}
-
-
-def wdl_table(label_col: str, rows: list[dict]) -> dict:
-    """rows: [{"label":.., "win":n, "draw":n, "loss":n}] (already sorted/limited)."""
-    return {"type": "wdl_table", "label_col": label_col, "rows": rows}
 
 
 def drilltable(columns: list[str], rows: list[dict]) -> dict:
@@ -119,25 +114,13 @@ def wdl_barstack(rows: list[dict], title: str = "") -> dict:
     return {"type": "barstack", "rows": bs_rows, "palette": WDL_PALETTE, "title": title}
 
 
-def donut(segments: list[dict], center: str = "", sub: str = "") -> dict:
-    """A ring chart. segments: [{"name":.., "value":n, "color":css}]; `center`
-    and `sub` are the big/small labels drawn in the hole."""
-    return {"type": "donut", "segments": segments, "center": center, "sub": sub}
-
-
 def timeline(items: list[dict], title: str = "") -> dict:
     """A chronological strip of result cells (oldest → newest).
 
-    items: [{"outcome":"win"|"draw"|"loss", "label":?}] — `label` is the tooltip.
+    items: [{"outcome":"win"|"draw"|"loss", "label":?, "id":?}] — `label` is
+    the tooltip; with an `id` the cell opens that game's review.
     """
     return {"type": "timeline", "items": items, "title": title}
-
-
-def board(fen: str, caption: str = "", lastmove: str | None = None,
-          svg: str | None = None) -> dict:
-    """A single position. `svg` is optional pre-rendered SVG (server-side)."""
-    return {"type": "board", "fen": fen, "caption": caption,
-            "lastmove": lastmove, "svg": svg}
 
 
 def review(positions: list[dict], moves: list[dict], orientation: str,
@@ -171,36 +154,10 @@ def verdict(game_id, label, headline, sub, detail, outcome, primary,
             "manual": manual, "anomalous": anomalous, "cheated": cheated}
 
 
-def ranking(title: str, rows: list[dict]) -> dict:
-    """A ranked list. rows: [{"label":.., "value":.., "sub":?}] (pre-sorted)."""
-    return {"type": "ranking", "title": title, "rows": rows}
-
-
-def movetree(children: list[dict]) -> dict:
-    """An expandable opening tree.
-
-    children: list of nodes, each
-        {"move":san, "count":n, "w":n,"d":n,"l":n, "mine":bool, "children":[...]}
-    sorted by count. `mine` flags moves the analysed player made (vs opponent's).
-    """
-    return {"type": "movetree", "children": children}
-
-
-def recent() -> dict:
-    """Placeholder for the recent-games list — the web app fetches & analyses
-    it lazily (engine-backed) via /api/recent with a 5/10/20/All selector."""
-    return {"type": "recent"}
-
-
 def conversion() -> dict:
     """Placeholder for conversion/stage analysis — fetched lazily (engine-backed)
-    via /api/conversion over all games of the chosen format."""
+    via /api/insights over all games of the chosen format."""
     return {"type": "conversion"}
-
-
-def group(title: str, widgets: list[dict], layout: str = "row") -> dict:
-    """A container that lays out child widgets in a row or grid."""
-    return {"type": "group", "title": title, "layout": layout, "widgets": widgets}
 
 
 def reasons(label: str, groups: list[dict]) -> dict:
@@ -215,3 +172,32 @@ def reasons(label: str, groups: list[dict]) -> dict:
 
 def text(body: str) -> dict:
     return {"type": "text", "body": body}
+
+
+def actions(items: list[dict]) -> dict:
+    """A row of buttons that navigate within the app.
+
+    items: [{"label":.., "route": "#/train?kind=missed"}] — `route` is an app
+    route (the hash the frontend router reads), never an external URL.
+    """
+    return {"type": "actions", "items": items}
+
+
+def gapchart(rows: list[dict], unit: str = "%", note: str = "") -> dict:
+    """You against a baseline, one row per measure, as a gap with its interval.
+
+    rows: [{"label":.., "group":.., "gap": x, "lo": x, "hi": x,
+            "verdict": "leak"|"strength"|"level", "detail": "..."}]
+    Gaps are fractions when unit == "%" (0.12 = 12% more than the baseline).
+    Positive is worse — more lost than the baseline.
+    """
+    return {"type": "gapchart", "rows": rows, "unit": unit, "note": note}
+
+
+def focus(items: list[dict]) -> dict:
+    """Short findings, each with an optional next step.
+
+    items: [{"tone": "leak"|"strength"|"lean"|"info", "title":.., "body":..,
+             "action": {"label":.., "route":..} | None}]
+    """
+    return {"type": "focus", "items": items}

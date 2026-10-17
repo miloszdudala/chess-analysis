@@ -4,91 +4,30 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Chess Analyzer</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 45 45'%3E%3Crect width='45' height='45' rx='9' fill='%231d6f6a'/%3E%3Cpath d='M22 10c10.5 1 16.5 8 16 29H15c0-9 10-6.5 8-21M24 18c.38 2.91-5.55 7.37-8 9-3 2-2.82 4.34-5 4-1-.94 1.41-3.04 0-3-1 0 .19 1.23-1 2-1 0-4 1-4-4 0-2 6-12 6-12s1.89-1.9 2-3.5c-.73-1-.5-2-.5-3 1-1 3 2.5 3 2.5h2s.78-2 2.5-3c1 0 1 3 1 3' fill='%23fff' stroke='%23fff' stroke-width='1.5' stroke-linejoin='round'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="/style.css">
-<style>
-  body { padding-top: 0; }
-  header.app { position: sticky; top: 0; z-index: 5; background: #fbfaf7e6;
-    backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); padding: .9rem 1.1rem; }
-  .appbar { max-width: 960px; margin: 0 auto; display: flex; align-items: center;
-    gap: 1.5rem; flex-wrap: wrap; }
-  .brand { font-size: 1.05rem; font-weight: 600; letter-spacing: -.01em; }
-  .tabs { display: flex; gap: 1.1rem; }
-  .tab { background: none; border: 0; color: var(--mut); cursor: pointer; font: inherit;
-    padding: .2rem 0; border-bottom: 2px solid transparent; }
-  .tab:hover { color: var(--ink); }
-  .tab.active { color: var(--ink); border-bottom-color: var(--accent); }
-  .sync { background: var(--panel); border: 1px solid var(--line);
-    color: var(--ink); border-radius: 8px; padding: .4rem .85rem; cursor: pointer;
-    font: inherit; font-size: .85rem; }
-  .sync:hover { border-color: var(--accent); color: var(--accent); }
-  .sync:disabled { opacity: .55; cursor: default; }
-  /* the account every tab reports on — global, so switching player is one edit */
-  .userbox { margin-left: auto; display: flex; align-items: center; gap: .45rem; }
-  .userbox span { font-size: .68rem; text-transform: uppercase; letter-spacing: .08em;
-    color: var(--mut); }
-  .userbox input { background: var(--panel); color: var(--ink); font: inherit;
-    font-size: .85rem; border: 1px solid var(--line); border-radius: 8px;
-    padding: .35rem .6rem; width: 10.5rem; }
-  .userbox input:focus { outline: none; border-color: var(--accent); }
-  .prewarm { max-width: 960px; margin: .3rem auto 0; font-size: .82rem; color: var(--mut);
-    display: none; align-items: center; gap: .6rem; }
-  .prewarm.on { display: flex; }
-  .prewarm .pw-track { flex: 1; height: 6px; background: var(--line); border-radius: 4px;
-    overflow: hidden; max-width: 320px; }
-  .prewarm .pw-fill { height: 100%; width: 0; background: var(--accent);
-    transition: width .4s ease; }
-  .prewarm.done .pw-fill { background: var(--win); }
-  .prewarm .pw-txt { white-space: nowrap; }
-  .controls { max-width: 960px; margin: 1.3rem auto .4rem; display: flex; gap: .7rem;
-    align-items: end; flex-wrap: wrap; }
-  .field { display: flex; flex-direction: column; gap: .3rem; }
-  .field label { font-size: .68rem; text-transform: uppercase; letter-spacing: .08em;
-    color: var(--mut); }
-  .field input, .field select { background: var(--panel); color: var(--ink);
-    border: 1px solid var(--line); border-radius: 8px; padding: .5rem .6rem; font: inherit; }
-  .field input { min-width: 11rem; } .field select.wide { min-width: 22rem; }
-  button.go { background: var(--accent); color: #fff; border: 0; font-weight: 600;
-    border-radius: 8px; padding: .58rem 1.2rem; cursor: pointer; font: inherit; }
-  button.go:disabled { opacity: .5; cursor: default; }
-  .chips { max-width: 960px; margin: .3rem auto; display: flex; gap: .4rem; flex-wrap: wrap;
-    align-items: center; }
-  .chips .lead { font-size: .68rem; text-transform: uppercase; letter-spacing: .08em;
-    color: var(--mut); margin-right: .2rem; }
-  .chip { background: var(--panel); border: 1px solid var(--line); color: var(--mut);
-    border-radius: 999px; padding: .25rem .7rem; cursor: pointer; font-size: .82rem; }
-  .chip.on { background: var(--accent); border-color: var(--accent); color: #fff; }
-  .status { max-width: 960px; margin: .4rem auto; color: var(--mut); min-height: 1.1rem;
-    font-size: .85rem; }
-  .status.err { color: var(--loss); }
-  .spinner { display: inline-block; width: 13px; height: 13px; border: 2px solid var(--line);
-    border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite;
-    vertical-align: -2px; margin-right: .5rem; }
-  @keyframes spin { to { transform: rotate(360deg); } }
-  #result h1 { margin: .6rem 0 .15rem; }
-</style>
 </head>
 <body>
 <header class="app">
   <div class="appbar">
-    <span class="brand">♟ Chess Analyzer</span>
-    <div class="tabs" id="tabs"></div>
-    <label class="userbox" title="Any Chess.com account — its games are synced automatically">
-      <span>Username</span>
-      <input id="f-user" placeholder="chess.com account" autocomplete="off" spellcheck="false">
-    </label>
+    <a class="brand" href="#/overview">
+      <svg viewBox="0 0 45 45"><rect width="45" height="45" rx="10" fill="var(--accent)"/><path d="M22 10c10.5 1 16.5 8 16 29H15c0-9 10-6.5 8-21M24 18c.38 2.91-5.55 7.37-8 9-3 2-2.82 4.34-5 4-1-.94 1.41-3.04 0-3-1 0 .19 1.23-1 2-1 0-4 1-4-4 0-2 6-12 6-12s1.89-1.9 2-3.5c-.73-1-.5-2-.5-3 1-1 3 2.5 3 2.5h2s.78-2 2.5-3c1 0 1 3 1 3" fill="var(--accent-ink)" stroke="var(--accent-ink)" stroke-width="1.5" stroke-linejoin="round"/></svg>
+      Chess Analyzer <span class="ver">2.0</span>
+    </a>
+    <nav class="tabs" id="tabs"></nav>
+    <div class="who">
+      <select id="f-format" title="Which games every page reports on"></select>
+      <input id="f-user" placeholder="chess.com account" autocomplete="off" spellcheck="false" title="Any Chess.com account — its games are synced automatically">
+      <button class="iconbtn" id="theme" title="Light / dark">◐</button>
+    </div>
   </div>
+  <div class="jobbar"><div class="fill" id="job-fill"></div></div>
+  <div class="jobline" id="job-line"></div>
 </header>
-
-<div class="controls" id="controls"></div>
-<div class="chips" id="chips"></div>
-<div class="status" id="status"></div>
-<div class="prewarm" id="prewarm-bar">
-  <div class="pw-track"><div class="pw-fill" id="pw-fill"></div></div>
-  <span class="pw-txt" id="pw-txt"></span>
-</div>
-
-<div class="wrap"><div id="result"></div></div>
-
-<script src="/app.js"></script>
+<main class="page">
+  <div class="status" id="status"></div>
+  <div id="view"></div>
+</main>
+<script type="module" src="/js/main.js"></script>
 </body>
 </html>

@@ -21,11 +21,11 @@ def test_evalbar_widget():
     assert w["plies"] and w["moves"] == ["e4"]
 
 
-def test_board_widget_optional_svg():
-    w = W.board("fen-string", caption="cap", lastmove="e2e4", svg="<svg/>")
-    assert w["type"] == "board"
-    assert w["fen"] == "fen-string" and w["svg"] == "<svg/>"
-    assert w["caption"] == "cap" and w["lastmove"] == "e2e4"
+def test_actions_and_focus_widgets():
+    a = W.actions([{"label": "Train", "route": "#/train"}])
+    assert a["type"] == "actions" and a["items"][0]["route"] == "#/train"
+    f = W.focus([{"tone": "leak", "title": "t", "body": "b", "action": None}])
+    assert f["type"] == "focus" and f["items"][0]["tone"] == "leak"
 
 
 def test_wdl_barstack_shape_and_note():
@@ -36,10 +36,10 @@ def test_wdl_barstack_shape_and_note():
     assert row["note"] == "60% · 10g"            # 6/10 wins over 10 games
 
 
-def test_donut_widget():
-    w = W.donut([{"name": "win", "value": 3, "color": "#0a0"}], center="60%", sub="win rate")
-    assert w["type"] == "donut" and w["center"] == "60%"
-    assert w["segments"][0]["color"] == "#0a0"
+def test_gapchart_widget():
+    w = W.gapchart([{"label": "Opening", "gap": 0.1, "lo": 0.02, "hi": 0.2,
+                     "verdict": "leak"}])
+    assert w["type"] == "gapchart" and w["unit"] == "%"
 
 
 def test_timeline_widget():

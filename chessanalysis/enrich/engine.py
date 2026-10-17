@@ -19,6 +19,7 @@ import chess.pgn
 from .. import config, store
 
 MATE_CP = 10000
+CP_CAP = 1000          # evals are capped here for centipawn loss (ACPL)
 # win%-drop thresholds (percentage points), à la Lichess.
 BLUNDER, MISTAKE, INACCURACY = 20.0, 10.0, 5.0
 
@@ -271,13 +272,18 @@ def _derive(raw: dict, depth: int, engine_name: str) -> GameAnalysis:
         white_to_move = (i % 2 == 0)
         color = "white" if white_to_move else "black"
         cp_before_w, cp_after_w = evals[i], evals[i + 1]
+        # centipawn loss on evals capped at ±CP_CAP, as Lichess does: a mate
+        # score is 10000, so trading a forced mate for a merely won position
+        # would otherwise count as thousands of centipawns "lost" and swamp
+        # the whole game's ACPL. Win% (and so accuracy) saturates on its own.
+        cb, ca = (max(-CP_CAP, min(CP_CAP, e)) for e in (cp_before_w, cp_after_w))
 
         if white_to_move:
-            cp_loss = max(0, cp_before_w - cp_after_w)
+            cp_loss = max(0, cb - ca)
             wp_before = win_prob(cp_before_w)
             wp_after = win_prob(cp_after_w)
         else:
-            cp_loss = max(0, cp_after_w - cp_before_w)
+            cp_loss = max(0, ca - cb)
             wp_before = win_prob(-cp_before_w)
             wp_after = win_prob(-cp_after_w)
 

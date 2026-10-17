@@ -112,6 +112,13 @@ CREATE TABLE IF NOT EXISTS puzzles (
   reps INTEGER DEFAULT 0, lapses INTEGER DEFAULT 0, last REAL, grade TEXT,
   retired INTEGER DEFAULT 0);
 CREATE INDEX IF NOT EXISTS ix_puzzles_due ON puzzles(user, retired, due);
+
+-- Where each side of an analysed game lost its win chance (see coach.py), kept
+-- because summarising a game means replaying it; `version` says by which recipe.
+CREATE TABLE IF NOT EXISTS ledgers (
+  gid TEXT NOT NULL, color TEXT NOT NULL, depth INTEGER NOT NULL,
+  version INTEGER NOT NULL, elo INTEGER, data TEXT NOT NULL,
+  PRIMARY KEY (gid, color, depth));
 """
 
 # Columns added after a table first shipped: CREATE TABLE IF NOT EXISTS never

@@ -26,11 +26,21 @@ class GameContext:
 
 
 @dataclass
-class CompareContext:
-    """scope="compare" — two player cohorts and their head-to-head games."""
-    a: PlayerContext
-    b: PlayerContext
+class ScoutContext:
+    """scope="scout" — an opponent's recent games, and yours beside them.
+
+    `games` are theirs, from their point of view; `mine` are the scouting
+    player's own games (any colour), so their main lines can be set against
+    your experience of the same positions; `head_to_head` are the games
+    between the two, from your point of view.
+    """
+    opponent: str
+    games: list[Game]
+    me: str = ""
+    mine: list[Game] = field(default_factory=list)
     head_to_head: list[Game] = field(default_factory=list)
+    time_class: str | None = None
+    months: int = 0
 
 
 @dataclass
@@ -53,3 +63,17 @@ class CohortContext:
     hist: list = field(default_factory=list)       # peers: accuracy distribution
     percentile: int | None = None
     totals: dict = field(default_factory=dict)
+
+
+@dataclass
+class OverviewContext:
+    """scope="overview" — the home page: one player, the coach's comparison
+    with players at their rating (all games, and recent), and the training
+    queue."""
+    player: str
+    games: list[Game]
+    time_class: str | None = None
+    coach: dict | None = None          # coach.compare over every counted game
+    recent: dict | None = None         # ...over the latest RECENT games
+    training: dict | None = None       # training.summary
+    pending: int = 0                   # your games not yet analysed for the coach

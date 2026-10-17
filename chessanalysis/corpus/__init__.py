@@ -322,6 +322,7 @@ def totals(depth: int = DEPTH) -> dict:
         "frontier": c.execute("SELECT COUNT(*) FROM frontier").fetchone()[0],
         "pending": c.execute(
             "SELECT COUNT(*) FROM games g LEFT JOIN analysis a "
-            "ON a.gid=g.gid AND a.depth=? WHERE a.gid IS NULL", (depth,)).fetchone()[0],
+            "ON a.gid=g.gid AND a.depth=? WHERE a.gid IS NULL AND g.source='corpus'",
+            (depth,)).fetchone()[0],
         "depth": depth,
     }

@@ -1,10 +1,8 @@
-"""Section categorisation plumbing + the new actionable player metrics."""
+"""Section categorisation plumbing + the player metrics."""
 from __future__ import annotations
 
 from chessanalysis.contexts import PlayerContext
 from chessanalysis.document import Document
-from chessanalysis.metrics.player.breakdowns import by_game_length
-from chessanalysis.metrics.player.openings import _opening_family, opening_repertoire
 from chessanalysis.model import Game, Move
 from chessanalysis.registry import metrics_for
 
@@ -44,15 +42,6 @@ def _wdl_by_label(barstack):
             for r in barstack["rows"]}
 
 
-# --- game length ------------------------------------------------------------
-
-def test_game_length_buckets():
-    games = [make_game("win", plies=10), make_game("loss", plies=90)]
-    rows = _wdl_by_label(by_game_length(_ctx(games)))
-    assert rows["Short (< 20 moves)"]["win"] == 1
-    assert rows["Long (> 40 moves)"]["loss"] == 1
-
-
 # --- opponent strength ------------------------------------------------------
 
 def test_opponent_strength_uses_pre_game_ratings():
@@ -74,31 +63,3 @@ def test_opponent_strength_uses_pre_game_ratings():
     rows = {r[0]: r for r in table["rows"]}
     assert "Stronger (+50…+150)" in rows            # pre-game gap +50
     assert rows["Stronger (+50…+150)"][2] == 1      # ...with the win counted there
-
-
-# --- opening repertoire -----------------------------------------------------
-
-def test_opening_family_keeps_two_word_root():
-    assert _opening_family("Giuoco Piano Game Main Line 4...d6") == "Giuoco Piano"
-    assert _opening_family("Ruy Lopez Opening Morphy Defense") == "Ruy Lopez"
-    assert _opening_family("Slav Defense") == "Slav Defense"
-
-
-def test_opening_repertoire_groups_scores_and_compares_to_baseline():
-    games = [make_game("loss", color="black", ecourl="https://x/Giuoco-Piano-Game-Main")
-             for _ in range(6)]
-    games += [make_game("win", color="white", ecourl="https://x/Ruy-Lopez-Opening-Morphy")
-              for _ in range(6)]
-    text, table = opening_repertoire(_ctx(games))
-    assert text["type"] == "text"
-    by_name = {r[0]: r for r in table["rows"]}
-    gp = by_name["Giuoco Piano"]
-    assert gp[1] == "Black" and gp[2] == 6
-    assert gp[4] == "0%"            # all losses -> 0 score
-    assert gp[5] == "-50%"          # overall baseline is 50% (6W/6L)
-    assert "Ruy Lopez" in by_name
-
-
-def test_opening_repertoire_gates_small_samples():
-    games = [make_game("win", ecourl="https://x/Sicilian-Defense") for _ in range(3)]
-    assert opening_repertoire(_ctx(games)) is None

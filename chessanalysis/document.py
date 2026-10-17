@@ -1,7 +1,7 @@
 """The Document — a mode's output: ordered widgets + metadata.
 
-This is the serialization boundary. `to_dict()` is what a JS frontend would
-fetch as JSON; render_html.py turns the same structure into a static page.
+This is the serialization boundary: `to_dict()` is the JSON the web app's
+frontend renders (frontend/js/widgets.js), and what the CLI writes to disk.
 """
 from __future__ import annotations
 

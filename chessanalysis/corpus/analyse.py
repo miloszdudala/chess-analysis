@@ -39,7 +39,7 @@ _N_COLS = SAMPLE_COLS.count(",") + 1
 
 # Bumped whenever the way a sample row is derived changes; `ensure_samples`
 # rebuilds every row from the stored analyses when it does.
-SAMPLES_VERSION = "divider-1"
+SAMPLES_VERSION = "divider-2"   # 2: centipawn loss on evals capped at ±1000
 
 
 def analyse_pgn(pgn_text: str, engine, depth: int = DEPTH) -> dict | None:
@@ -171,15 +171,19 @@ def ensure_samples(depth: int = DEPTH, log=None) -> int:
 def pending(depth: int = DEPTH) -> int:
     return store.connect().execute(
         "SELECT COUNT(*) FROM games g LEFT JOIN analysis a "
-        "ON a.gid=g.gid AND a.depth=? WHERE a.gid IS NULL", (depth,)).fetchone()[0]
+        "ON a.gid=g.gid AND a.depth=? WHERE a.gid IS NULL AND g.source='corpus'",
+        (depth,)).fetchone()[0]
 
 
 def shard(i: int, n: int, depth: int = DEPTH) -> None:
-    """Analyse every n-th unanalysed game. One plain OS process per shard."""
+    """Analyse every n-th unanalysed corpus game. One plain OS process per
+    shard. Your own games go through `analyse_own`; a scouted opponent's are
+    never analysed in bulk."""
     conn = store.connect()
     todo = conn.execute(
         "SELECT g.gid, g.pgn, g.welo, g.belo, g.result FROM games g "
         "LEFT JOIN analysis a ON a.gid=g.gid AND a.depth=? WHERE a.gid IS NULL "
+        "AND g.source='corpus' "
         "ORDER BY g.gid", (depth,)).fetchall()[i::n]
     if not todo:
         return
@@ -200,16 +204,20 @@ def shard(i: int, n: int, depth: int = DEPTH) -> None:
         proc.close()
 
 
-def analyse_own(user: str, depth: int = DEPTH, limit: int = 25) -> int:
-    """Analyse your own not-yet-covered games, in this process.
+def analyse_own(user: str, depth: int = DEPTH, limit: int | None = 25,
+                on_game=None, stop=None) -> int:
+    """Analyse your own not-yet-covered games at the corpus depth, in this
+    process — one engine, no sharding.
 
-    Only ever a handful — the games played since you last opened the tab — so
-    one engine and no sharding. Capped so a first run on a long history cannot
-    hang a page load; the rest are picked up by the next Expand.
+    `limit` caps one call so a page load on a long history cannot hang (the
+    background job passes None and reports through `on_game(seconds)`;
+    `stop()` returning True ends it between games).
     """
     from .. import corpus
 
-    todo = corpus.pending_own(user, depth)[:limit]
+    todo = corpus.pending_own(user, depth)
+    if limit:
+        todo = todo[:limit]
     if not todo:
         return 0
     proc = chess.engine.SimpleEngine.popen_uci(eng.find_engine())
@@ -218,6 +226,9 @@ def analyse_own(user: str, depth: int = DEPTH, limit: int = 25) -> int:
     done = 0
     try:
         for g in todo:
+            if stop and stop():
+                break
+            t = time.time()
             raw = analyse_pgn(g.pgn, proc, depth)
             if raw is None:
                 continue
@@ -227,8 +238,10 @@ def analyse_own(user: str, depth: int = DEPTH, limit: int = 25) -> int:
             if welo.isdigit() and belo.isdigit():
                 _insert_samples(conn, sample_rows(g.game_id, raw, int(welo),
                                                   int(belo), g.result, depth))
+            conn.commit()
             done += 1
-        conn.commit()
+            if on_game:
+                on_game(time.time() - t)
     finally:
         proc.close()
     return done

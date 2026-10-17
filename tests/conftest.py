@@ -127,3 +127,63 @@ def tiny_book(tmp_path, monkeypatch):
     loaded = book._book.__wrapped__()
     monkeypatch.setattr(book, "_book", lambda: loaded)
     return loaded
+
+
+# --- whole games in the store ---------------------------------------------------
+
+_store_ids = iter(range(10 ** 9))
+
+
+def store_game(white, black, welo, belo, sans, result="1-0", source="corpus",
+               evals=None, depth=10, top=False, date="2026.10.01", tc="600"):
+    """Put one game — PGN with clocks — and optionally its analysis in the store.
+
+    `sans` is the move list; `evals` the white-POV array (len(sans) + 1).
+    With `top`, every position also gets three candidate moves (the first
+    three legal ones), the first scored as the eval — enough for training.
+    Returns the game id.
+    """
+    from chessanalysis import model, store
+
+    n = next(_store_ids)
+    gid = str(900000 + n)
+    clock, parts = 600.0, []
+    for i, san in enumerate(sans):
+        if i % 2 == 0:
+            parts.append(f"{i // 2 + 1}.")
+            clock -= 7
+        parts.append(f"{san} {{[%clk 0:{int(clock) // 60:02d}:{int(clock) % 60:02d}]}}")
+    pgn = (f'[Event "Live Chess"]\n[Site "Chess.com"]\n[Date "{date}"]\n'
+           f'[White "{white}"]\n[Black "{black}"]\n[Result "{result}"]\n'
+           f'[WhiteElo "{welo}"]\n[BlackElo "{belo}"]\n[TimeControl "{tc}"]\n'
+           f'[UTCDate "{date}"]\n[UTCTime "10:{n % 60:02d}:00"]\n'
+           f'[Termination "{white} won by resignation"]\n'
+           f'[Link "https://www.chess.com/game/live/{gid}"]\n\n'
+           f'{" ".join(parts)} {result}\n')
+    game = model.parse_pgn_text(pgn)[0]
+    store.save_games([model.game_row(game, source=source)])
+    if evals is not None:
+        board = chess.Board()
+        fens, uci, tops = [], [], []
+        for san in sans:
+            fens.append(board.fen())
+            mv = board.parse_san(san)
+            uci.append(mv.uci())
+            board.push(mv)
+        fens.append(board.fen())
+        if top:
+            b = chess.Board()
+            for i, fen in enumerate(fens):
+                b = chess.Board(fen)
+                legal = [m.uci() for m in b.legal_moves][:3]
+                tops.append([{"uci": u, "cp": evals[i] - 40 * j} for j, u in enumerate(legal)])
+        raw = {"evals": list(evals), "moves_san": list(sans), "moves_uci": uci,
+               "fens": fens, "best_uci": [t[0]["uci"] if t else "" for t in tops] or [""] * len(sans),
+               "top_moves": tops}
+        store.save_analysis(gid, depth, raw, multipv=3 if top else 1, engine="test")
+    return gid
+
+
+# a short, legal game: 20 plies of normal development
+GAME_SANS = ["e4", "e5", "Nf3", "Nc6", "Bc4", "Bc5", "c3", "Nf6", "d3", "d6",
+             "O-O", "O-O", "Re1", "a6", "Bb3", "Ba7", "h3", "h6", "Nbd2", "Re8"]

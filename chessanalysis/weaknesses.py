@@ -10,7 +10,7 @@ fair baseline rather than a confounded one:
                        loses evaluation.
 
 Fed by the same per-game analyses (and cache) as insights.py; served with the
-conversion report via /api/conversion.
+conversion report via /api/insights.
 """
 from __future__ import annotations
 

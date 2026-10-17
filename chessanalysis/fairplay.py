@@ -6,7 +6,7 @@ authoritative source for "was this opponent cheating" — far better than
 guessing from the moves — so games against those accounts are detected rather
 than flagged by hand.
 
-Statuses are cached on disk and refreshed during a sync, so the rest of the app
+Statuses are kept in the store and refreshed during a sync, so the rest of the app
 (and `model.load_games` in particular) reads them without ever touching the
 network. A ban is permanent, so once an account is seen closed it is never
 re-checked.
@@ -28,7 +28,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from . import cache
+from . import store
 
 API = "https://api.chess.com/pub"
 HEADERS = {"User-Agent": "Personal storage"}
@@ -58,7 +58,7 @@ def _fetch_status(username: str) -> str | None:
 
 def status(username: str) -> str | None:
     """Cached profile status for one account, or None if never looked up."""
-    entry = cache.load("fairplay", username.lower())
+    entry = store.kv_get("fairplay", username.lower())
     return (entry or {}).get("status")
 
 
@@ -115,12 +115,12 @@ def refresh(opponents, log=None) -> dict:
     checked = 0
     for name in sorted(played):
         recent = bool(played[name]) and (now - played[name]) < _RECENT
-        entry = cache.load("fairplay", name)
+        entry = store.kv_get("fairplay", name)
         if _stale(entry, recent):
             st = _fetch_status(name)
             checked += 1
             if st is not None:
-                cache.save("fairplay", name, {"status": st, "checked": time.time()})
+                store.kv_set("fairplay", name, {"status": st, "checked": time.time()})
                 if st == BANNED and log:
                     log(f"  {name}: banned for fair-play violations")
             time.sleep(0.2)               # be polite to the API

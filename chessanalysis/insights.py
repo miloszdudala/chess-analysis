@@ -13,13 +13,12 @@ from collections import Counter
 from . import diagnosis as dx
 from . import overrides
 from . import widgets as W
+from .phases import ORDER as PHASE_ORDER
 
 
 def _table_for(outcome):
     return (dx.WIN_REASONS if outcome == "win"
             else dx.LOSS_REASONS if outcome == "loss" else dx.DRAW_REASONS)
-
-PHASE_ORDER = ["Opening", "Middlegame", "Endgame"]
 
 # (label, predicate on user-perspective centipawns before the move)
 STATES = [
@@ -29,14 +28,6 @@ STATES = [
     ("Worse (−2…−0.8)", lambda c: -200 < c <= -80),
     ("Losing (≤ −2)", lambda c: c <= -200),
 ]
-
-
-def _phase(move_no: int) -> str:
-    if move_no <= 12:
-        return "Opening"
-    if move_no <= 32:
-        return "Middlegame"
-    return "Endgame"
 
 
 def _blank():
@@ -69,25 +60,25 @@ def conversion_report(pairs, cp: int = 200) -> list[dict]:
         # stay behind (loss) for the rest of the game — where it was really decided.
         # "Lead" = at least half the decisive threshold (e.g. +/-1 pawn).
         lead = cp // 2
+        # The deciding move is ply idx+1; its phase is the one it was played in.
         if g.outcome == "win":
             idx = max((i for i, v in enumerate(user_evals) if v < lead), default=-1)
             mv = max(1, (idx + 2) // 2)
-            won_phase[_phase(mv)] += 1
+            won_phase[a.phase_of(max(1, idx + 1))] += 1
             won_moves.append(mv)
         elif g.outcome == "loss":
             idx = max((i for i, v in enumerate(user_evals) if v > -lead), default=-1)
             mv = max(1, (idx + 2) // 2)
-            lost_phase[_phase(mv)] += 1
+            lost_phase[a.phase_of(max(1, idx + 1))] += 1
             lost_moves.append(mv)
 
         for m in a.moves:
             if m.color != g.color:
                 continue
-            move_no = (m.ply + 1) // 2
             cp_white = evals[m.ply - 1] if 0 <= m.ply - 1 < len(evals) else 0
             cp_user = cp_white if g.color == "white" else -cp_white
             state = next(s[0] for s in STATES if s[1](cp_user))
-            for bucket in (phase_agg[_phase(move_no)], state_agg[state]):
+            for bucket in (phase_agg[a.phase_of(m.ply)], state_agg[state]):
                 bucket["n"] += 1
                 bucket["acc"] += m.accuracy
                 bucket["bl"] += (m.label == "blunder")
@@ -361,7 +352,7 @@ _PROGRESS_METRICS = [
     ("bl100", "Blunders / 100 moves", False, 0.3),
     ("conv", "Conversion of winning positions", True, 3.0),
     ("punish", "Opponent blunders punished", True, 3.0),
-    ("open_cpl", "Opening cp-loss per move (to move 12)", False, 3.0),
+    ("open_cpl", "Opening cp-loss per move", False, 3.0),
     ("tt", "Games reaching time trouble", False, 3.0),
 ]
 
@@ -391,7 +382,7 @@ def _progress_block(pairs, cp):
             if m.color == g.color:
                 own += 1
                 bl += (m.label == "blunder")
-                if m.ply <= 24:
+                if a.phase_of(m.ply) == "Opening":
                     open_cpl.append(m.cp_loss)
             elif 1 <= m.ply < len(a.evals) and \
                     sgn * a.evals[m.ply] - sgn * a.evals[m.ply - 1] >= OPP_DROP:

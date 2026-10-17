@@ -3,9 +3,9 @@ from ... import widgets as W
 from ...corpus import BAND_SIZE
 from ...registry import metric
 
-WHERE = [("dec_op", "Opening (to move 12)", "#8aa4b8"),
-         ("dec_mg", "Middlegame (13–32)", "#c1573f"),
-         ("dec_eg", "Endgame (33+)", "#3f7d5a")]
+WHERE = [("dec_op", "Opening", "#8aa4b8"),
+         ("dec_mg", "Middlegame", "#c1573f"),
+         ("dec_eg", "Endgame", "#3f7d5a")]
 COLOURS = {"white": "#d9d2c2", "draw": "#cbc3b2", "black": "#4a4a4a"}
 
 

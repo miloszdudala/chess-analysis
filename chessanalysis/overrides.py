@@ -2,11 +2,11 @@
 and games flagged as not representative.
 
 The heuristic in `diagnosis` is occasionally wrong; a player can correct the
-reason flag for a game in its review. Corrections are stored here (one small
-JSON file) and applied everywhere the diagnosis is used: the single-game
-verdict and the aggregate "why you win & lose" distribution.
+reason flag for a game in its review. Corrections live in the store's
+`overrides` table and are applied everywhere the diagnosis is used: the
+single-game verdict and the aggregate "why you win & lose" distribution.
 
-The same file holds *game flags*: a game whose result says nothing about how
+The same row holds the *game flag*: a game whose result says nothing about how
 either player played (an opponent's disconnect, a deliberately thrown game).
 Flagged games are dropped from every statistic — `model.load_games` filters
 them out by default — but stay reviewable and stay listed in the history, so
@@ -14,12 +14,7 @@ flagging is a way to annotate the record rather than to hide it.
 """
 from __future__ import annotations
 
-import json
-import os
-import threading
-
-_PATH = os.path.join("data", "overrides.json")
-_LOCK = threading.Lock()
+from . import store
 
 # the one flag: this result says nothing about how anyone played — a
 # disconnect, a game thrown on purpose, an opening tried for fun
@@ -27,49 +22,40 @@ ANOMALY = "anomaly"
 FLAGS = {ANOMALY: "Anomalous — doesn't count toward stats"}
 
 
-def _load_all() -> dict:
-    try:
-        with open(_PATH, encoding="utf-8") as f:
-            return json.load(f)
-    except (OSError, json.JSONDecodeError):
-        return {}
-
-
-def _write(data: dict) -> None:
-    os.makedirs(os.path.dirname(_PATH), exist_ok=True)
-    with open(_PATH, "w", encoding="utf-8") as f:
-        json.dump(data, f)
-
-
 def _update(game_id, **fields) -> None:
-    """Merge `fields` into one game's entry; None clears a field, and an entry
-    with nothing left in it is dropped so the file stays small."""
-    with _LOCK:
-        data = _load_all()
-        gid = str(game_id)
-        entry = dict(data.get(gid) or {})
-        for k, v in fields.items():
-            if v is None:
-                entry.pop(k, None)
-            else:
-                entry[k] = v
-        if entry:
-            data[gid] = entry
-        else:
-            data.pop(gid, None)
-        _write(data)
+    """Merge `fields` into one game's row; None clears a field, and a row with
+    nothing left in it is dropped."""
+    gid = str(game_id)
+    conn = store.connect()
+    row = conn.execute("SELECT reason, flag, note FROM overrides WHERE gid=?",
+                       (gid,)).fetchone()
+    entry = dict(row) if row else {"reason": None, "flag": None, "note": None}
+    entry.update(fields)
+    if any(entry.values()):
+        conn.execute("INSERT OR REPLACE INTO overrides(gid,reason,flag,note) "
+                     "VALUES(?,?,?,?)", (gid, entry["reason"], entry["flag"],
+                                         entry["note"]))
+    else:
+        conn.execute("DELETE FROM overrides WHERE gid=?", (gid,))
+    conn.commit()
 
 
 def get(game_id) -> dict | None:
     """The override entry for one game, e.g. {"primary": "blunder"}, or None."""
     if not game_id:
         return None
-    return _load_all().get(str(game_id))
+    row = store.connect().execute(
+        "SELECT reason, flag, note FROM overrides WHERE gid=?",
+        (str(game_id),)).fetchone()
+    if row is None:
+        return None
+    out = {"primary": row["reason"], "flag": row["flag"], "note": row["note"]}
+    return {k: v for k, v in out.items() if v is not None} or None
 
 
 def set_reason(game_id, primary: str | None) -> None:
     """Set (or, with primary=None, clear) the manual reason for a game."""
-    _update(game_id, primary=primary)
+    _update(game_id, reason=primary)
 
 
 def set_flag(game_id, flag: str | None, note: str | None = None) -> None:
@@ -95,9 +81,10 @@ def get_flag(game_id) -> dict | None:
 def flags() -> dict[str, dict]:
     """{game_id: {"flag":.., "note":..}} for every flagged game — one read, for
     callers annotating a whole list of games."""
-    return {gid: {"flag": e["flag"], "note": e.get("note")}
-            for gid, e in _load_all().items()
-            if isinstance(e, dict) and e.get("flag") in FLAGS}
+    return {r["gid"]: {"flag": r["flag"], "note": r["note"]}
+            for r in store.connect().execute(
+                "SELECT gid, flag, note FROM overrides WHERE flag IS NOT NULL")
+            if r["flag"] in FLAGS}
 
 
 def flagged_ids() -> set[str]:

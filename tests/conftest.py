@@ -10,7 +10,7 @@ from __future__ import annotations
 import chess
 import pytest
 
-from chessanalysis import cache, store
+from chessanalysis import store
 from chessanalysis.enrich import engine as eng
 
 
@@ -77,13 +77,6 @@ def sample_raw():
 @pytest.fixture
 def sample_analysis(sample_raw):
     return eng._derive(sample_raw, depth=12, engine_name="TestFish")
-
-
-@pytest.fixture
-def isolated_cache(tmp_path, monkeypatch):
-    """Point the on-disk cache at a temp dir so tests never touch real caches."""
-    monkeypatch.setattr(cache, "CACHE_DIR", str(tmp_path / "cache"))
-    return tmp_path
 
 
 @pytest.fixture(autouse=True)

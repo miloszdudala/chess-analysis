@@ -26,35 +26,24 @@ import chess
 import chess.engine
 import chess.pgn
 
-from .. import store
+from .. import phases, store
 from ..enrich import engine as eng
 from . import DEPTH, MULTIPV
-
-# Non-pawn, non-king material at which the endgame has begun.
-ENDGAME_MATERIAL = 13
-_VAL = {chess.KNIGHT: 3, chess.BISHOP: 3, chess.ROOK: 5, chess.QUEEN: 9}
 
 SAMPLE_COLS = (
     "gid,color,depth,elo,opp_elo,band,outcome,plies,acc,acpl,inacc,mist,blun,"
     "op_n,op_acc,op_cpl,op_ia,op_mi,op_bl,"
     "mg_n,mg_acc,mg_cpl,mg_ia,mg_mi,mg_bl,"
-    "eg_n,eg_acc,eg_cpl,eg_ia,eg_mi,eg_bl,dec_ply,dec_side,dec_held")
+    "eg_n,eg_acc,eg_cpl,eg_ia,eg_mi,eg_bl,dec_ply,dec_side,dec_held,mg_ply,eg_ply")
+_N_COLS = SAMPLE_COLS.count(",") + 1
 
-
-def _phase(move_no: int) -> str:
-    """The split the rest of the app uses (weaknesses.py / insights.py)."""
-    if move_no <= 12:
-        return "op"
-    return "mg" if move_no <= 32 else "eg"
-
-
-def _material(board):
-    return sum(_VAL[p] * len(board.pieces(p, c))
-               for p in _VAL for c in (chess.WHITE, chess.BLACK))
+# Bumped whenever the way a sample row is derived changes; `ensure_samples`
+# rebuilds every row from the stored analyses when it does.
+SAMPLES_VERSION = "divider-1"
 
 
 def analyse_pgn(pgn_text: str, engine, depth: int = DEPTH) -> dict | None:
-    """Raw engine output for one game, plus the ply the endgame started."""
+    """Raw engine output for one game."""
     game = chess.pgn.read_game(io.StringIO(pgn_text))
     if game is None:
         return None
@@ -63,7 +52,7 @@ def analyse_pgn(pgn_text: str, engine, depth: int = DEPTH) -> dict | None:
     if not moves:
         return None
     evals, best_uci, san, uci, fens, top = [], [], [], [], [], []
-    eg_ply, t0 = None, time.time()
+    t0 = time.time()
 
     def ev(b):
         if b.is_game_over():
@@ -83,9 +72,7 @@ def analyse_pgn(pgn_text: str, engine, depth: int = DEPTH) -> dict | None:
         # silently collapse to a single bucket.
         return cp, best, ([{"uci": best, "cp": cp}] if best else [])
 
-    for i, mv in enumerate(moves):
-        if eg_ply is None and _material(board) <= ENDGAME_MATERIAL:
-            eg_ply = i + 1
+    for mv in moves:
         cp, best, tm = ev(board)
         evals.append(cp)
         best_uci.append(best)
@@ -99,13 +86,13 @@ def analyse_pgn(pgn_text: str, engine, depth: int = DEPTH) -> dict | None:
     top.append(tm)
     fens.append(board.fen())
     return {"evals": evals, "best_uci": best_uci, "moves_san": san, "moves_uci": uci,
-            "fens": fens, "top_moves": top, "eg_ply": eg_ply,
-            "secs": round(time.time() - t0, 2)}
+            "fens": fens, "top_moves": top, "secs": round(time.time() - t0, 2)}
 
 
 def sample_rows(gid, raw, welo, belo, result, depth=DEPTH) -> list[list]:
     """The two sample rows — white's and black's — from one engine pass."""
     a = eng._derive(raw, depth, "sf")
+    div = a.division
     out = []
     for color in ("white", "black"):
         ms = [m for m in a.moves if m.color == color]
@@ -113,7 +100,7 @@ def sample_rows(gid, raw, welo, belo, result, depth=DEPTH) -> list[list]:
             continue
         ph = {k: [0, 0.0, 0, 0, 0, 0] for k in ("op", "mg", "eg")}
         for m in ms:
-            p = ph[_phase((m.ply + 1) // 2)]
+            p = ph[div.key_of_ply(m.ply)]
             p[0] += 1
             p[1] += m.accuracy
             p[2] += m.cp_loss
@@ -132,8 +119,53 @@ def sample_rows(gid, raw, welo, belo, result, depth=DEPTH) -> list[list]:
             n, acc, cpl, ia, mi, bl = ph[k]
             r += [n, round(acc / n, 2) if n else None, cpl, ia, mi, bl]
         r += [d["ply"], d["side"], int(d["held"])] if d["reached"] else [None, None, None]
+        r += [div.mid, div.end]
         out.append(r)
     return out
+
+
+def _insert_samples(conn, rows) -> None:
+    conn.executemany(f"INSERT OR REPLACE INTO samples({SAMPLE_COLS}) "
+                     f"VALUES({','.join('?' * _N_COLS)})", rows)
+
+
+def ensure_samples(depth: int = DEPTH, log=None) -> int:
+    """Rebuild every sample row if they were derived by an older recipe.
+
+    No engine is involved: a sample is a summary of an analysis that is
+    already stored, and the PGN beside it fills in anything an early pass did
+    not keep. Returns how many games were re-derived (0 when up to date).
+    """
+    from . import _rehydrate
+
+    if store.kv_get("meta", f"samples_version_{depth}") == SAMPLES_VERSION:
+        return 0
+    conn = store.connect()
+    rows = conn.execute(
+        "SELECT g.gid, g.pgn, g.welo, g.belo, g.result FROM games g "
+        "JOIN analysis a ON a.gid=g.gid AND a.depth=? "
+        "WHERE g.welo IS NOT NULL AND g.belo IS NOT NULL", (depth,)).fetchall()
+    done = 0
+    batch = []
+    for r in rows:
+        raw = store.load_analysis(r["gid"], depth)
+        if not raw or not raw.get("evals"):
+            continue
+        raw = _rehydrate(raw, store.unpack_pgn(r["pgn"]))
+        if raw is None:
+            continue
+        batch += sample_rows(r["gid"], raw, r["welo"], r["belo"], r["result"], depth)
+        done += 1
+        if len(batch) >= 500:
+            _insert_samples(conn, batch)
+            conn.commit()
+            batch = []
+            if log:
+                log(f"re-deriving samples: {done}/{len(rows)}")
+    _insert_samples(conn, batch)
+    conn.commit()
+    store.kv_set("meta", f"samples_version_{depth}", SAMPLES_VERSION)
+    return done
 
 
 def pending(depth: int = DEPTH) -> int:
@@ -161,11 +193,8 @@ def shard(i: int, n: int, depth: int = DEPTH) -> None:
             store.save_analysis(r["gid"], depth, raw, multipv=MULTIPV,
                                 engine="sf", secs=raw["secs"])
             if r["welo"] is not None and r["belo"] is not None:
-                for row in sample_rows(r["gid"], raw, r["welo"], r["belo"], r["result"],
-                                       depth):
-                    conn.execute(
-                        f"INSERT OR REPLACE INTO samples({SAMPLE_COLS}) "
-                        f"VALUES({','.join('?' * 34)})", row)
+                _insert_samples(conn, sample_rows(r["gid"], raw, r["welo"],
+                                                  r["belo"], r["result"], depth))
                 conn.commit()
     finally:
         proc.close()
@@ -196,10 +225,8 @@ def analyse_own(user: str, depth: int = DEPTH, limit: int = 25) -> int:
                                 engine="sf", secs=raw["secs"])
             welo, belo = g.h("WhiteElo"), g.h("BlackElo")
             if welo.isdigit() and belo.isdigit():
-                for row in sample_rows(g.game_id, raw, int(welo), int(belo),
-                                       g.result, depth):
-                    conn.execute(f"INSERT OR REPLACE INTO samples({SAMPLE_COLS}) "
-                                 f"VALUES({','.join('?' * 34)})", row)
+                _insert_samples(conn, sample_rows(g.game_id, raw, int(welo),
+                                                  int(belo), g.result, depth))
             done += 1
         conn.commit()
     finally:
@@ -224,3 +251,6 @@ if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "shard":
         shard(int(sys.argv[2]), int(sys.argv[3]),
               int(sys.argv[4]) if len(sys.argv) > 4 else DEPTH)
+    elif len(sys.argv) > 1 and sys.argv[1] == "rebuild":
+        store.kv_set("meta", f"samples_version_{DEPTH}", None)
+        print(ensure_samples(DEPTH, log=print), "games re-derived")

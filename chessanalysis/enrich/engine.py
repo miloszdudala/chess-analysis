@@ -148,6 +148,20 @@ class GameAnalysis:
     counts: dict = field(default_factory=dict)      # per side: inaccuracy/mistake/blunder
     fens: list = field(default_factory=list)        # FEN per position, len = plies + 1
     top_moves: list = field(default_factory=list)   # per position: [{"uci","cp"},..] (white POV)
+    _division: object = field(default=None, repr=False, compare=False)
+
+    @property
+    def division(self):
+        """Where the opening, middlegame and endgame begin (see `phases`)."""
+        if self._division is None:
+            from .. import phases
+            self._division = (phases.divide_fens(self.fens) if self.fens
+                              else phases.Division(None, None, len(self.moves)))
+        return self._division
+
+    def phase_of(self, ply: int) -> str:
+        """"Opening" / "Middlegame" / "Endgame" for the move with this ply."""
+        return self.division.of_ply(ply)
 
     def blunders(self, color: str | None = None) -> list[MoveEval]:
         return [m for m in self.moves

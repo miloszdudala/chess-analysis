@@ -49,11 +49,12 @@ _AGG = """
   SUM(s.outcome='loss' AND s.dec_side=s.color)  AS threw,
   SUM(s.outcome='win'  AND s.dec_side IS NOT NULL AND s.dec_side<>s.color) AS comeback,
   SUM(s.outcome='loss' AND s.dec_side IS NOT NULL AND s.dec_side<>s.color) AS outplayed,
-  -- when it happened, on the same phase boundaries the accuracy split uses
+  -- when it happened: the phase of the position where the eval first crossed,
+  -- on the same per-game boundaries (phases.py) the accuracy split uses
   AVG(CASE WHEN s.dec_ply IS NOT NULL THEN (s.dec_ply+1)/2 END) AS dec_move,
-  SUM(s.dec_ply<=24) AS dec_op,
-  SUM(s.dec_ply>24 AND s.dec_ply<=64) AS dec_mg,
-  SUM(s.dec_ply>64) AS dec_eg
+  SUM(s.dec_ply < COALESCE(s.mg_ply, s.eg_ply, 100000)) AS dec_op,
+  SUM(s.dec_ply >= s.mg_ply AND (s.eg_ply IS NULL OR s.dec_ply < s.eg_ply)) AS dec_mg,
+  SUM(s.dec_ply >= s.eg_ply) AS dec_eg
 """
 
 

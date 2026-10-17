@@ -8,7 +8,6 @@ from tests.test_diagnosis import DGame, analysis, mev
 
 
 def test_set_get_and_clear(tmp_path, monkeypatch):
-    monkeypatch.setattr(overrides, "_PATH", str(tmp_path / "ov.json"))
     assert overrides.get("g1") is None
     overrides.set_reason("g1", "threw_away")
     assert overrides.get("g1") == {"primary": "threw_away"}
@@ -17,7 +16,6 @@ def test_set_get_and_clear(tmp_path, monkeypatch):
 
 
 def test_override_moves_a_game_to_another_bucket(tmp_path, monkeypatch):
-    monkeypatch.setattr(overrides, "_PATH", str(tmp_path / "ov.json"))
     # a loss the heuristic reads as one blunder
     blunder = analysis([mev(1, "white", "blunder", wp=40.0, cpl=420)], [20, -400])
     g = DGame("loss")
@@ -37,7 +35,6 @@ def test_override_moves_a_game_to_another_bucket(tmp_path, monkeypatch):
 
 
 def test_override_ignored_if_reason_not_in_outcome(tmp_path, monkeypatch):
-    monkeypatch.setattr(overrides, "_PATH", str(tmp_path / "ov.json"))
     blunder = analysis([mev(1, "white", "blunder", wp=40.0, cpl=420)], [20, -400])
     g = DGame("loss")
     g.game_id = "gid-2"
@@ -49,7 +46,6 @@ def test_override_ignored_if_reason_not_in_outcome(tmp_path, monkeypatch):
 # --- game flags: excluded from stats, still in the history --------------------
 
 def test_flag_set_get_and_clear(tmp_path, monkeypatch):
-    monkeypatch.setattr(overrides, "_PATH", str(tmp_path / "ov.json"))
     assert overrides.get_flag("g1") is None
     overrides.set_flag("g1", "anomaly", "opponent disconnected")
     assert overrides.get_flag("g1") == {"flag": "anomaly",
@@ -61,7 +57,6 @@ def test_flag_set_get_and_clear(tmp_path, monkeypatch):
 
 def test_flag_and_reason_coexist(tmp_path, monkeypatch):
     """Both live in one entry — setting either must not wipe the other."""
-    monkeypatch.setattr(overrides, "_PATH", str(tmp_path / "ov.json"))
     overrides.set_reason("g2", "drift")
     overrides.set_flag("g2", "anomaly")
     assert overrides.get("g2")["primary"] == "drift"
@@ -73,7 +68,6 @@ def test_flag_and_reason_coexist(tmp_path, monkeypatch):
 
 
 def test_flags_annotates_a_whole_list_in_one_read(tmp_path, monkeypatch):
-    monkeypatch.setattr(overrides, "_PATH", str(tmp_path / "ov.json"))
     overrides.set_flag("a", "anomaly", "disconnect")
     overrides.set_flag("b", "anomaly")
     overrides.set_reason("c", "drift")             # a reason is not a flag
@@ -83,7 +77,6 @@ def test_flags_annotates_a_whole_list_in_one_read(tmp_path, monkeypatch):
 
 
 def test_unknown_flag_is_not_honoured(tmp_path, monkeypatch):
-    monkeypatch.setattr(overrides, "_PATH", str(tmp_path / "ov.json"))
     overrides.set_flag("g3", "nonsense")
     assert overrides.get_flag("g3") is None            # not in FLAGS -> ignored
     assert overrides.flagged_ids() == set()
@@ -119,7 +112,6 @@ def _library():
 def test_load_games_drops_flagged_but_can_include_them(tmp_path, monkeypatch):
     from chessanalysis.model import load_games
 
-    monkeypatch.setattr(overrides, "_PATH", str(tmp_path / "ov.json"))
     _library()
     assert {g.game_id for g in load_games("me")} == {"111", "222"}
 

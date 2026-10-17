@@ -90,7 +90,35 @@ CREATE TABLE IF NOT EXISTS players (
   archives TEXT, spent TEXT, taken INTEGER DEFAULT 0, tried INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS frontier (
   username TEXT PRIMARY KEY, rating INTEGER, seen REAL);
+
+-- Small keyed state that used to be a folder of JSON files: fair-play statuses
+-- (ns 'fairplay'), which archive months a sync has finished (ns 'scrape'), and
+-- the store's own bookkeeping (ns 'meta').
+CREATE TABLE IF NOT EXISTS kv (
+  ns TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL,
+  PRIMARY KEY (ns, key));
+
+-- What the player has said about their own games: a corrected win/loss reason,
+-- and the anomaly flag that drops a game from every statistic.
+CREATE TABLE IF NOT EXISTS overrides (
+  gid TEXT PRIMARY KEY, reason TEXT, flag TEXT, note TEXT);
+
+-- Training: positions from the player's own games, scheduled for spaced
+-- repetition. `ply` is the move to find; `fen` the position it is found in.
+CREATE TABLE IF NOT EXISTS puzzles (
+  id TEXT PRIMARY KEY, user TEXT NOT NULL, gid TEXT NOT NULL, ply INTEGER NOT NULL,
+  kind TEXT NOT NULL, fen TEXT NOT NULL, solution TEXT NOT NULL, data TEXT NOT NULL,
+  created REAL, due REAL, interval REAL DEFAULT 0, ease REAL DEFAULT 2.5,
+  reps INTEGER DEFAULT 0, lapses INTEGER DEFAULT 0, last REAL, grade TEXT,
+  retired INTEGER DEFAULT 0);
+CREATE INDEX IF NOT EXISTS ix_puzzles_due ON puzzles(user, retired, due);
 """
+
+# Columns added after a table first shipped: CREATE TABLE IF NOT EXISTS never
+# alters an existing table, so they are added here when missing.
+_ADDED_COLUMNS = {
+    "samples": (("mg_ply", "INTEGER"), ("eg_ply", "INTEGER")),
+}
 
 GAME_COLS = ("gid", "white", "black", "welo", "belo", "time_control", "time_class",
              "date", "sort_key", "eco", "result", "termination", "plies",
@@ -116,7 +144,13 @@ def connect() -> sqlite3.Connection:
     with _init_lock:
         if DB_PATH not in _initialised:
             conn.executescript(SCHEMA)
+            for table, cols in _ADDED_COLUMNS.items():
+                have = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+                for name, kind in cols:
+                    if name not in have:
+                        conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {kind}")
             conn.commit()
+            _import_legacy(conn)
             _initialised.add(DB_PATH)
     _local.conn, _local.path = conn, DB_PATH
     return conn
@@ -228,3 +262,62 @@ def analysed_depths(gid: str) -> list[int]:
     """Depths already computed for a game, deepest last."""
     return [r[0] for r in connect().execute(
         "SELECT depth FROM analysis WHERE gid=? ORDER BY depth", (str(gid),))]
+
+
+# --- small keyed state ---------------------------------------------------------
+
+def kv_get(ns: str, key: str, default=None):
+    row = connect().execute("SELECT value FROM kv WHERE ns=? AND key=?",
+                            (ns, str(key))).fetchone()
+    return json.loads(row[0]) if row else default
+
+
+def kv_set(ns: str, key: str, value) -> None:
+    conn = connect()
+    conn.execute("INSERT OR REPLACE INTO kv(ns,key,value) VALUES(?,?,?)",
+                 (ns, str(key), json.dumps(value, separators=(",", ":"))))
+    conn.commit()
+
+
+def kv_all(ns: str) -> dict:
+    return {r[0]: json.loads(r[1]) for r in connect().execute(
+        "SELECT key, value FROM kv WHERE ns=?", (ns,))}
+
+
+def _import_legacy(conn: sqlite3.Connection) -> None:
+    """Fold the pre-2.0 JSON files into the store, once.
+
+    They lived beside the database — `cache/<ns>/<key>.json` and
+    `overrides.json` — so they are looked for beside *this* database, never in
+    the working directory: a test's throwaway store must not inherit a real
+    player's flags.
+    """
+    if conn.execute("SELECT 1 FROM kv WHERE ns='meta' AND key='legacy_imported'").fetchone():
+        return
+    base = os.path.dirname(DB_PATH) or "."
+    for ns in ("fairplay", "scrape"):
+        folder = os.path.join(base, "cache", ns)
+        if not os.path.isdir(folder):
+            continue
+        for name in os.listdir(folder):
+            if not name.endswith(".json"):
+                continue
+            try:
+                with open(os.path.join(folder, name), encoding="utf-8") as f:
+                    value = json.load(f)
+            except (OSError, json.JSONDecodeError):
+                continue
+            conn.execute("INSERT OR IGNORE INTO kv(ns,key,value) VALUES(?,?,?)",
+                         (ns, name[:-5], json.dumps(value)))
+    try:
+        with open(os.path.join(base, "overrides.json"), encoding="utf-8") as f:
+            legacy = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        legacy = {}
+    for gid, e in legacy.items():
+        if isinstance(e, dict):
+            conn.execute("INSERT OR IGNORE INTO overrides(gid,reason,flag,note) "
+                         "VALUES(?,?,?,?)", (gid, e.get("primary"), e.get("flag"),
+                                             e.get("note")))
+    conn.execute("INSERT OR REPLACE INTO kv(ns,key,value) VALUES('meta','legacy_imported','true')")
+    conn.commit()

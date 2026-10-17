@@ -1,7 +1,8 @@
 # Personal game data — never commit (contains account names & game history)
-data/chess.db
-data/chess.db-wal
-data/chess.db-shm
+data/*.db
+data/*.db-wal
+data/*.db-shm
+data/cache*/
 games/
 *.pgn
 
@@ -10,7 +11,6 @@ report.html
 report.json
 report*.json
 out/
-data/cache/
 data/overrides.json
 data/webapp.log
 

@@ -21,16 +21,7 @@ from . import widgets as W
 from .clocks import clock_profile
 from .diagnosis import _mv
 from .enrich.engine import MATE_CP
-
-PHASE_ORDER = ["Opening", "Middlegame", "Endgame"]
-
-
-def _phase(move_no: int) -> str:
-    if move_no <= 12:
-        return "Opening"
-    if move_no <= 32:
-        return "Middlegame"
-    return "Endgame"
+from .phases import ORDER as PHASE_ORDER
 
 
 # --- 1) you vs your opponents, phase by phase --------------------------------
@@ -44,7 +35,7 @@ def phase_parity(pairs) -> list[dict]:
     for g, a in pairs:
         for m in a.moves:
             side = "mine" if m.color == g.color else "theirs"
-            b = agg[_phase((m.ply + 1) // 2)][side]
+            b = agg[a.phase_of(m.ply)][side]
             b[0] += 1
             b[1] += m.accuracy
             b[2] += (m.label == "mistake")

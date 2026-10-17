@@ -49,7 +49,6 @@ def test_index_and_stylesheet(client):
 def test_flag_endpoint_round_trip(client, tmp_path, monkeypatch):
     from chessanalysis import overrides
 
-    monkeypatch.setattr(overrides, "_PATH", str(tmp_path / "ov.json"))
     r = client.post("/api/flag?game=g9&flag=anomaly&note=opponent+disconnected")
     assert r.status_code == 200 and r.get_json()["flag"] == "anomaly"
     assert overrides.get_flag("g9")["note"] == "opponent disconnected"
@@ -61,7 +60,6 @@ def test_flag_endpoint_round_trip(client, tmp_path, monkeypatch):
 def test_flag_endpoint_rejects_bad_input(client, tmp_path, monkeypatch):
     from chessanalysis import overrides
 
-    monkeypatch.setattr(overrides, "_PATH", str(tmp_path / "ov.json"))
     assert client.post("/api/flag?flag=anomaly").status_code == 400   # no game
     assert client.post("/api/flag?game=g1&flag=nope").status_code == 400
     assert overrides.get_flag("g1") is None
@@ -70,7 +68,6 @@ def test_flag_endpoint_rejects_bad_input(client, tmp_path, monkeypatch):
 def test_games_endpoint_marks_flagged(client, tmp_path, monkeypatch):
     from chessanalysis import overrides
 
-    monkeypatch.setattr(overrides, "_PATH", str(tmp_path / "ov.json"))
     games = client.get("/api/games").get_json()
     if not games:
         pytest.skip("no local PGN library")

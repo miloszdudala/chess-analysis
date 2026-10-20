@@ -12,7 +12,7 @@ COLOURS = {"white": "#d9d2c2", "draw": "#cbc3b2", "black": "#4a4a4a"}
 def _rows(ctx):
     """(label, aggregate) pairs for whichever scope is active."""
     if ctx.scope == "peers":
-        return [("You", ctx.me), ("Your band", ctx.cohort)]
+        return [("You", ctx.me), (ctx.who[0].upper() + ctx.who[1:], ctx.cohort)]
     return [(f"{b['band']}–{b['band'] + BAND_SIZE - 1}", b) for b in ctx.bands]
 
 
@@ -35,16 +35,18 @@ def colour_split(ctx):
              "segments": [{"name": "white", "value": s["white"]},
                           {"name": "draw", "value": s["draw"]},
                           {"name": "black", "value": s["black"]}],
-             "note": f"{100 * s['white'] / s['games']:.0f}% W · {s['games']}g"}
+             "note": f"White wins {100 * s['white'] / s['games']:.0f}% · {s['games']} games"}
             for s in split]
     tot = {k: sum(s[k] for s in split) for k in ("white", "draw", "black", "games")}
     rows.append({"label": "All bands",
                  "segments": [{"name": c, "value": tot[c]}
                               for c in ("white", "draw", "black")],
-                 "note": f"{100 * tot['white'] / tot['games']:.0f}% W · {tot['games']}g"})
+                 "note": f"White wins {100 * tot['white'] / tot['games']:.0f}% · {tot['games']} games"})
     return [W.barstack(rows, COLOURS),
-            W.text(f"{tot['games']} games: white scores "
-                   f"{100 * (tot['white'] + tot['draw'] / 2) / tot['games']:.1f}%.")]
+            W.text(f"Each game counted once, in the range of the two players' average "
+                   f"rating. Over all {tot['games']} games White scores "
+                   f"{100 * (tot['white'] + tot['draw'] / 2) / tot['games']:.1f}% (wins plus "
+                   f"half the draws).")]
 
 
 @metric("brackets", title="Where games are decided", order=60)
@@ -64,10 +66,12 @@ def where_decided(ctx):
         rows.append({"label": label,
                      "segments": [{"name": name, "value": int(d[key] or 0)}
                                   for key, name, _ in WHERE],
-                     "note": f"avg move {d['dec_move']:.0f}" if d["dec_move"] else ""})
+                     "note": f"on average at move {d['dec_move']:.0f}" if d["dec_move"] else ""})
     if not rows:
         return None
-    widgets = [W.barstack(rows, {name: col for _, name, col in WHERE})]
+    widgets = [W.text("The phase in which the evaluation first reached ±2.00 — the "
+                      "point where one side had a winning advantage."),
+               W.barstack(rows, {name: col for _, name, col in WHERE})]
     if ctx.scope == "ladder":
         widgets.append(W.xyline(
             [{"name": name, "color": col,
@@ -76,5 +80,6 @@ def where_decided(ctx):
                                      / max(sum(int(b[k] or 0) for k, _, _ in WHERE), 1), 1)}
                          for b in ctx.bands]}
              for key, name, col in WHERE],
-            y_label="% of games decided here", x_label="Rating band", y_zero=True))
+            y_label="% of games decided here", x_label="Rating (start of range)",
+            y_zero=True))
     return widgets

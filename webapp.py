@@ -92,8 +92,16 @@ def script(name):
 @app.get("/api/config")
 @api
 def api_config():
+    from chessanalysis import book, corpus, glossary
+    from chessanalysis.enrich import engine as eng
+
     return jsonify({"user": config.get("CHESS_USERNAME"), "modes": modes.names(),
-                    "depth": _review_depth(), "formats": list(FORMATS)})
+                    "depth": _review_depth(), "formats": list(FORMATS),
+                    "corpus": {"time_control": corpus.TIME_CONTROL, "depth": corpus.DEPTH,
+                               "label": glossary.time_control_label(corpus.TIME_CONTROL)},
+                    "book": book.facts(),
+                    "thresholds": {"inaccuracy": eng.INACCURACY, "mistake": eng.MISTAKE,
+                                   "blunder": eng.BLUNDER}})
 
 
 SYNC_MIN_INTERVAL = 60
@@ -230,6 +238,12 @@ def api_analysis_start():
 @api
 def api_overview():
     return jsonify(modes.get("overview")(_user(), time_class=_format()).to_dict())
+
+
+@app.get("/api/guide")
+@api
+def api_guide():
+    return jsonify(modes.get("guide")().to_dict())
 
 
 @app.get("/api/player")
@@ -502,6 +516,7 @@ def api_corpus_status():
     from chessanalysis import corpus
 
     return jsonify({**corpus.totals(), "coverage": corpus.coverage(),
+                    "band_size": corpus.BAND_SIZE,
                     "job": jobs.get("expand").snapshot()})
 
 

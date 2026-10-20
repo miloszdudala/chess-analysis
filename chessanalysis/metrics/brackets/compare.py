@@ -1,4 +1,4 @@
-"""You against your band, using the report's own classifiers.
+"""You against players at your rating, using the report's own classifiers.
 
 These reuse the same functions the Player report runs — `diagnosis.diagnose`,
 the think-time buckets — but tally both sides
@@ -36,9 +36,10 @@ def _pct(n, total):
 
 
 def _gap(a, at, b, bt):
+    """The difference between two shares, in percentage points."""
     if not at or not bt:
         return "—"
-    return f"{100 * a / at - 100 * b / bt:+.0f}"
+    return f"{100 * a / at - 100 * b / bt:+.0f}".replace("-", "−")
 
 
 def _rows(mine, theirs, label_of, order=None):
@@ -73,9 +74,10 @@ def reasons(ctx):
 
     mt, tt = tally(mine), tally(theirs)
     widgets = [W.text(
-        "Every game is reduced to one dominant reason. Your column shows the "
-        "raw count too, because a percentage of a handful of games is a fragile "
-        "number — read the shape, not the decimals.")]
+        f"Every game is reduced to one main reason for its result, the same way for "
+        f"your games and for those of {ctx.who}. Your column shows the count of games too: "
+        f"a share of a handful of games moves a lot with one game more or less. "
+        f"The difference is your share minus theirs.")]
     for outcome, label in (("loss", "Why you lose"), ("win", "Why you win"),
                            ("draw", "Your draws")):
         if not sum(mt[outcome].values()):
@@ -84,17 +86,18 @@ def reasons(ctx):
                      lambda k, o=outcome: dx.reason_label(o, k))
         if rows:
             widgets.append(W.table(
-                [label, f"You ({sum(mt[outcome].values())})", "Your band", "Gap"], rows))
+                [label, f"You ({sum(mt[outcome].values())} games)",
+                 ctx.who[0].upper() + ctx.who[1:], "Difference"], rows))
     return widgets if len(widgets) > 1 else None
 
 
 @metric("brackets", title="Punishing their mistakes", order=58)
 def capitalisation(ctx):
-    """When the opponent blunders, how often the refutation is actually found.
+    """When the opponent makes a mistake, how often the engine's move is the
+    reply — counted exactly as on the Stats page (`insights.punish_chances`)."""
+    from ... import insights
+    from ...enrich.engine import MISTAKE
 
-    Needs the engine's best move, which is why the corpus pass records the
-    principal variation even at multipv 1.
-    """
     if not _peers(ctx):
         return None
     mine, theirs = _both(ctx)
@@ -102,35 +105,28 @@ def capitalisation(ctx):
     def tally(pairs):
         seen = taken = 0
         for g, a in pairs:
-            for i, m in enumerate(a.moves):
-                # their blunder, then my reply: did I play the engine's move?
-                if m.color == g.color or m.wp_loss < 15 or i + 1 >= len(a.moves):
-                    continue
-                nxt = a.moves[i + 1]
-                cand = a.top_moves[nxt.ply - 1] if nxt.ply - 1 < len(a.top_moves) else []
-                if not cand:
-                    continue
+            for _, reply in insights.punish_chances(g, a):
                 seen += 1
-                taken += nxt.move_uci == cand[0]["uci"]
+                taken += insights.punished(reply)
         return taken, seen
 
     mt, ms = tally(mine)
     tt, ts = tally(theirs)
     if ms < 10 or ts < 50:
         return None
-    return [W.text("After the opponent drops 15% or more of the win "
-                   "probability, how often the engine's own reply is the one "
-                   "played. Offensive sharpness, on identical terms."),
+    return [W.text(f"After the opponent's move cost them {MISTAKE:.0f}% win chance or "
+                   f"more, how often the reply was the engine's first choice — for you "
+                   f"and for {ctx.who}, at the same engine depth."),
             W.cards([
                 W.card(f"{100 * mt / ms:.0f}%", "You punish it",
                        f"{mt} of {ms} chances"),
-                W.card(f"{100 * tt / ts:.0f}%", "Your band punishes it",
+                W.card(f"{100 * tt / ts:.0f}%", "They punish it",
                        f"{tt} of {ts} chances")])]
 
 
 @metric("brackets", title="Think time and move quality", order=65)
 def think(ctx):
-    """Error rate by how long the move took, you against the band.
+    """Error rate by how long the move took, you against players at your rating.
 
     The raw numbers look backwards — accuracy falls as thinking time rises —
     because players think longest in the hardest positions. The comparison is
@@ -167,5 +163,9 @@ def think(ctx):
                      f"{100 * m[1] / m[0]:.1f}", f"{100 * t[1] / t[0]:.1f}"])
     if not rows:
         return None
-    return W.table(["Time spent", "Your moves", "Your accuracy", "Band accuracy",
-                    "Your blunders/100", "Band blunders/100"], rows)
+    return [W.text(f"Accuracy and blunders by how long the move took, you against "
+                   f"{ctx.who}. Long thinks look worse for everyone, because hard "
+                   f"positions are where people think longest; compare the two "
+                   f"columns, not the rows."),
+            W.table(["Time spent", "Your moves", "Your accuracy", "Their accuracy",
+                     "Your blunders per 100", "Their blunders per 100"], rows)]

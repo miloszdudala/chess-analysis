@@ -7,9 +7,9 @@ from chessanalysis.enrich.engine import GameAnalysis, MoveEval
 from .conftest import FakeGame
 
 
-def mev(ply, color, label="ok", cp_loss=0, fen="", uci="", best_san="", san="x"):
+def mev(ply, color, label="ok", cp_loss=0, fen="", uci="", best_san="", san="x", wp_loss=0.0):
     return MoveEval(ply=ply, color=color, san=san, best_san=best_san, cp_loss=cp_loss,
-                    wp_loss=0.0, accuracy=100.0, label=label, fen_before=fen, move_uci=uci)
+                    wp_loss=wp_loss, accuracy=100.0, label=label, fen_before=fen, move_uci=uci)
 
 
 def _analysis(moves, evals, fens=None, top_moves=None):
@@ -118,28 +118,32 @@ def test_cascading_error_probability():
              mev(3, "white", "blunder"), mev(4, "black"), mev(5, "white", "ok")]
     a = _analysis(moves, evals=[0] * 6)
     cards = _cards(insights.advanced_report([(FakeGame(color="white"), a)]))
-    # P(error | prior error): of 2 errors with a following move, 1 was followed by an error
-    assert cards["Cascading-error probability"] == "50%"
+    # of 2 errors with a following move, 1 was followed by an error
+    assert cards["A mistake straight after a mistake"] == "50%"
 
 
-def test_opponent_error_capitalization():
-    # black (opponent) hands white +2.0 on ply2; white refutes with the best move on ply3
+def test_opponent_mistakes_punished():
+    # black (opponent) gives away 17% on ply 2; white answers with the best move,
+    # and a 4% inaccuracy on ply 4 is not a mistake, so it is no chance at all
     moves = [mev(1, "white"),
-             mev(2, "black"),                                  # eval jumps for white here
+             mev(2, "black", label="mistake", wp_loss=17.0),
              mev(3, "white", san="Nf3", best_san="Nf3"),       # played the engine's #1
-             mev(4, "black")]
-    a = _analysis(moves, evals=[0, 0, 200, 200, 200])
+             mev(4, "black", wp_loss=4.0),
+             mev(5, "white", san="a3", best_san="Nc3")]
+    a = _analysis(moves, evals=[0, 0, 200, 200, 230, 230])
     cards = _cards(insights.advanced_report([(FakeGame(color="white"), a)]))
-    assert cards["Opponent-error capitalization"] == "100%"
+    assert cards["Their mistakes you punished"] == "100%"
+    chances = insights.punish_chances(FakeGame(color="white"), a)
+    assert [(m.ply, r.ply) for m, r in chances] == [(2, 3)]
 
 
 def test_advanced_report_trimmed_to_two_cards():
     moves = [mev(1, "white"), mev(2, "black")]
     a = _analysis(moves, evals=[0] * 3)
     out = insights.advanced_report([(FakeGame(color="white"), a)])
-    assert out[0]["title"] == "Tactical awareness & tilt"
+    assert out[0]["title"] == "Punishing mistakes, and mistakes in a row"
     labels = list(_cards(out))
-    assert labels == ["Opponent-error capitalization", "Cascading-error probability"]
+    assert labels == ["Their mistakes you punished", "A mistake straight after a mistake"]
 
 
 # --- progress check (recent vs baseline) ------------------------------------
@@ -163,7 +167,7 @@ def test_progress_report_flags_improvement():
     tbl = [w for w in out[0]["widgets"] if w["type"] == "table"][0]
     rows = {r[0]: r for r in tbl["rows"]}
     assert "better" in rows["Accuracy"][3]
-    assert "better" in rows["Blunders / 100 moves"][3]
+    assert "better" in rows["Blunders per 100 moves"][3]
 
 
 def test_progress_report_gates_small_samples():

@@ -5,8 +5,8 @@ For any position, what was played from it:
 * **you** — your own games in one colour and format, with your score after
   each move, the engine's average verdict on the position it led to, and —
   for your own moves — the win chance it cost on average;
-* **your band** — corpus players at your rating, so a move you make can be
-  set beside what people at your level make;
+* **players at your rating** — corpus players within `BAND` of it, so a move
+  you make can be set beside what people at your level make;
 * **masters** — the elite book (2500+ against 2300+, `book.py`), as the share
   of strong games that chose each move.
 
@@ -29,7 +29,7 @@ from . import book, store
 from .enrich.engine import win_prob
 
 MAX_PLY = 30          # fifteen moves each: the opening and its first fork
-BAND = 100            # "your band": corpus players within this of your rating
+BAND = 100            # "players at your rating": corpus players within this of it
 
 _LOCK = threading.Lock()
 _INDEX: dict = {}
@@ -160,9 +160,14 @@ def player(user, color, time_class=None) -> Index:
                    (_stamp_player(user), _overrides_stamp()))
 
 
+def band_range(elo) -> tuple[int, int]:
+    """The ratings "players at your rating" covers: ±BAND, snapped to 50s so
+    the index is shared by nearby ratings."""
+    return (elo - BAND) // 50 * 50, (elo + BAND) // 50 * 50
+
+
 def band(elo, time_class=None) -> Index:
-    lo, hi = elo - BAND, elo + BAND
-    lo, hi = lo // 50 * 50, hi // 50 * 50            # coarse, so it is reused
+    lo, hi = band_range(elo)
     return _cached(("band", lo, hi, time_class),
                    lambda: _band_index(lo, hi, time_class), _stamp_corpus())
 
@@ -241,7 +246,7 @@ def position(moves: list[str], user: str | None = None, color: str = "white",
         out["games"] = sorted(refs, key=lambda r: r["date"], reverse=True)[:12]
     if elo:
         out["band"] = _rows(band(elo, time_class), key)
-        out["band"]["range"] = [elo - BAND, elo + BAND]
+        out["band"]["range"] = list(band_range(elo))
     theory = book._book().get(chess.polyglot.zobrist_hash(board), {})
     total = sum(theory.values())
     masters = []

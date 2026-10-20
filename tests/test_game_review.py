@@ -67,7 +67,7 @@ def test_summary_cards_table_and_note(sample_analysis):
     assert cards["type"] == "cards"
     labels = [c["label"] for c in cards["items"]]
     assert "White accuracy" in labels and "Black accuracy" in labels
-    assert any(lbl.startswith("Decisive") for lbl in labels)
+    assert any(lbl.startswith("First winning advantage") for lbl in labels)
     assert [r[0] for r in table["rows"]] == ["White", "Black"]
     assert table["columns"][4:7] == ["Opening", "Middlegame", "Endgame"]
     assert note["type"] == "text"

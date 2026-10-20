@@ -49,7 +49,8 @@ const R = {
     return `<div class="tablewrap"><table class="drilltable"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
   },
 
-  text: (w) => `<p class="text">${esc(w.body)}</p>`,
+  text: (w) => `<p class="text">${esc(w.body)}` +
+    (w.link ? ` <a class="guide-link" href="${esc(w.link.route)}">${esc(w.link.label)} →</a>` : "") + `</p>`,
 
   actions: (w) => `<div class="actions">` + w.items.map((a) =>
     `<a class="btn" href="${esc(a.route)}">${esc(a.label)} →</a>`).join("") + `</div>`,
@@ -197,11 +198,12 @@ function buildGapChart(host, w) {
   const variants = w.variants || [{ label: "", rows: w.rows }];
   let cur = variants[0];
   const open = new Set();
+  const words = (v) => `${Math.abs(100 * v).toFixed(0)}% ${v >= 0 ? "more" : "less"}`;
   function draw() {
     const rows = cur.rows;
-    // the scale fits the gaps, not the widest interval: one thin bucket's
-    // ±80% whisker would otherwise flatten every other row (it runs off the
-    // edge instead)
+    // the scale fits the gaps, not the widest range: one thin row's ±150%
+    // range would otherwise flatten every other row. A range that runs past
+    // the edge ends in an arrow, and its numbers are on the row.
     const ext = Math.max(0.2, ...rows.map((r) => Math.abs(r.gap) * 1.6), ...rows.map((r) =>
       Math.min(0.4, Math.max(Math.abs(r.lo), Math.abs(r.hi)))));
     const span = Math.min(0.6, Math.ceil(ext * 10) / 10);
@@ -214,19 +216,23 @@ function buildGapChart(host, w) {
     for (const r of rows) {
       if (r.group !== group) { group = r.group; html += `<div class="gc-group">${esc(group)}</div>`; }
       const a = x(Math.min(0, r.gap)), b = x(Math.max(0, r.gap));
-      const tag = r.verdict === "leak" ? "leak" : r.verdict === "strength" ? "strength" : "within noise";
-      html += `<div class="gc-row ${r.verdict}${open.has(r.key) ? " open" : ""}" data-key="${esc(r.key)}" title="${esc(r.help || "")}">` +
-        `<span class="gc-label">${esc(r.label)}</span>` +
+      // a range over 100 points wide says nothing yet, whichever way the bar points
+      const tag = r.verdict === "leak" ? "weakness" : r.verdict === "strength" ? "strength"
+        : r.hi - r.lo > 1 ? "too few moves" : "unclear";
+      const range = `95% range: ${words(r.lo)} to ${words(r.hi)}`;
+      const clipLo = r.lo < -span ? `<span class="gc-clip l">◂</span>` : "";
+      const clipHi = r.hi > span ? `<span class="gc-clip r">▸</span>` : "";
+      html += `<div class="gc-row ${r.verdict}${open.has(r.key) ? " open" : ""}" data-key="${esc(r.key)}" title="${esc(range)}">` +
+        `<span class="gc-label">${esc(r.label)}${r.moves != null ? `<span class="gc-n">${r.moves} moves</span>` : ""}</span>` +
         `<span class="gc-track"><span class="gc-axis"></span>` +
-        `<span class="gc-ci" style="left:${x(r.lo)}%;width:${Math.max(0.5, x(r.hi) - x(r.lo))}%"></span>` +
+        `<span class="gc-ci" style="left:${x(r.lo)}%;width:${Math.max(0.5, x(r.hi) - x(r.lo))}%"></span>${clipLo}${clipHi}` +
         `<span class="gc-bar" style="left:${a}%;width:${Math.max(0.6, b - a)}%"></span></span>` +
-        `<span class="gc-val">${r.gap >= 0 ? "+" : "−"}${Math.abs(100 * r.gap).toFixed(0)}%</span>` +
+        `<span class="gc-val">${words(r.gap)}</span>` +
         `<span class="gc-tag">${tag}</span>` +
-        `<div class="gc-detail">${esc(r.help || "")} ${esc(r.detail || "")} Interval: ` +
-        `${(100 * r.lo).toFixed(0)}% to ${(100 * r.hi).toFixed(0)}%.</div></div>`;
+        `<div class="gc-detail">${esc(r.help || "")} ${esc(r.detail || range + ".")}</div></div>`;
     }
-    html += `<div class="gc-scale"><div></div><div><span>−${(span * 100).toFixed(0)}% · better than peers</span>` +
-      `<span>0</span><span>worse · +${(span * 100).toFixed(0)}%</span></div><div></div><div></div></div>`;
+    html += `<div class="gc-scale"><div></div><div><span>← loses less · better</span>` +
+      `<span>same as players at your rating</span><span>worse · loses more →</span></div><div></div><div></div></div>`;
     if (w.note) html += `<div class="gc-note">${esc(w.note)} Click a row for the numbers behind it.</div>`;
     host.innerHTML = `<div class="gapchart">${html}</div>`;
     host.querySelectorAll("[data-v]").forEach((b) => { b.onclick = () => { cur = variants[+b.dataset.v]; draw(); }; });

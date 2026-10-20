@@ -48,18 +48,21 @@ def phase_parity(pairs) -> list[dict]:
             continue
         my_acc, opp_acc = mi[1] / mi[0], th[1] / th[0]
         rows.append([
-            p, f"{my_acc:.1f}%", f"{opp_acc:.1f}%", f"{my_acc - opp_acc:+.1f}%",
+            p, f"{my_acc:.1f}%", f"{opp_acc:.1f}%",
+            f"{my_acc - opp_acc:+.1f}".replace("-", "−"),
             f"{100 * mi[3] / mi[0]:.1f} / {100 * th[3] / th[0]:.1f}",
             f"{100 * mi[2] / mi[0]:.1f} / {100 * th[2] / th[0]:.1f}",
         ])
     if not rows:
         return []
-    return [{"title": "You vs your opponents, phase by phase", "widgets": [
-        W.text("Same games, same positions — so the difficulty of each phase "
-               "affects both sides equally. A negative gap marks the phase "
-               "where you concede ground to the people you actually play."),
-        W.table(["Phase", "Your accuracy", "Their accuracy", "Gap",
-                 "Blunders/100 (you / them)", "Mistakes/100 (you / them)"], rows),
+    return [{"title": "You against your opponents, phase by phase", "widgets": [
+        W.text("Your accuracy and your opponents' in the same games, so how hard each "
+               "phase is affects both sides alike. The difference is yours minus "
+               "theirs: negative marks the phase where the people you actually play "
+               "do better than you."),
+        W.table(["Phase", "Your accuracy", "Their accuracy", "Difference",
+                 "Blunders per 100 moves (you / them)",
+                 "Mistakes per 100 moves (you / them)"], rows),
     ]}]
 
 
@@ -120,8 +123,8 @@ def think_time(pairs) -> list[dict]:
         rows = [[lbl, b["n"], f"{b['acc'] / b['n']:.1f}%",
                  round(100 * b["mi"] / b["n"], 1), round(100 * b["bl"] / b["n"], 1)]
                 for _, lbl in order if (b := agg[lbl])["n"] >= 30]
-        return W.table([col, "Moves", "Avg accuracy",
-                        "Mistakes/100", "Blunders/100"], rows) if rows else None
+        return W.table([col, "Moves", "Accuracy",
+                        "Mistakes per 100", "Blunders per 100"], rows) if rows else None
 
     tt = table(by_time, TIME_BUCKETS, "Time spent")
     tc = table(by_clock, CLOCK_BUCKETS, "Clock remaining")
@@ -129,17 +132,16 @@ def think_time(pairs) -> list[dict]:
         return []
     widgets = [W.text("Where your errors sit on the clock: by how long you "
                       "thought about the move itself, and by how much time you "
-                      "had left when you played it. Read the long-think rows "
-                      "with care — hard positions cause both long thinks and "
-                      "errors, so their rates are naturally worse; the "
-                      "instant-move rows carry the cleaner signal (errors "
-                      "there were played without looking).")]
+                      "had left when you played it. Long thinks look worse for "
+                      "everyone, because the hardest positions are where people "
+                      "think longest; the quick-move rows are the cleaner signal, "
+                      "since errors there were played without much looking.")]
     if bl_total >= 10:
         widgets.append(W.cards([
-            W.card(f"{round(100 * bl_instant / bl_total)}%", "Blunders on instant moves",
-                   sub=f"{bl_instant}/{bl_total} played in under 5s"),
-            W.card(f"{round(100 * bl_lowclock / bl_total)}%", "Blunders in time trouble",
-                   sub=f"{bl_lowclock}/{bl_total} with under 25% clock"),
+            W.card(f"{round(100 * bl_instant / bl_total)}%", "Blunders played instantly",
+                   sub=f"{bl_instant} of your {bl_total} blunders took under 5 seconds"),
+            W.card(f"{round(100 * bl_lowclock / bl_total)}%", "Blunders with the clock low",
+                   sub=f"{bl_lowclock} of {bl_total} came with under 25% of your time left"),
         ]))
     widgets += [w for w in (tt, tc) if w]
     return [{"title": "Think time & move quality", "widgets": widgets}]
@@ -152,13 +154,29 @@ LEAK_MIN_TIMES = 3       # a position+move must recur to be a habit, not a game
 LEAK_MIN_CPL = 40        # average eval cost that makes the habit a leak
 
 
+def _book_move(m) -> bool:
+    """Whether strong players play this move here. The same position is scored
+    the same way every time it recurs, so recurrence does not average out the
+    engine's error at a shallow depth — and a line strong players choose is not
+    a habit to fix, whatever a depth-10 search makes of it."""
+    import chess
+
+    from . import book
+    try:
+        return book.is_book(chess.Board(m.fen_before), m.move_uci)
+    except ValueError:
+        return False
+
+
 def opening_leaks(pairs) -> list[dict]:
     """Positions you keep reaching where you keep playing the same
-    eval-losing move — the concrete repertoire habits that cost points."""
+    eval-losing move — the concrete repertoire habits that cost you."""
     spots: dict = {}     # (fen-key, san) -> stats
     for g, a in pairs:
         for m in a.moves:
             if m.color != g.color or m.ply > LEAK_MAX_PLY or not m.fen_before:
+                continue
+            if _book_move(m):
                 continue
             key = (" ".join(m.fen_before.split()[:4]), m.san)
             s = spots.setdefault(key, {
@@ -192,8 +210,9 @@ def opening_leaks(pairs) -> list[dict]:
     for s in leaks[:10]:
         no, white_mv = s["move_no"], s["ply"] % 2 == 1
         after = s["prev"].most_common(1)[0][0]
+        # the move before a White move is Black's previous one, a number lower
         ctx = ("from the start" if after == "start" else
-               f"after {no}…{after}" if white_mv else f"after {no}.{after}")
+               f"after {no - 1}…{after}" if white_mv else f"after {no}.{after}")
         best = s["best"].most_common(1)[0][0] if s["best"] else "—"
         w, d, l = s["wdl"]["win"], s["wdl"]["draw"], s["wdl"]["loss"]
         rows.append({
@@ -204,10 +223,10 @@ def opening_leaks(pairs) -> list[dict]:
     return [{"title": "Recurring opening mistakes", "widgets": [
         W.text(f"Exact positions you reached at least {LEAK_MIN_TIMES} times in "
                f"the first {LEAK_MAX_PLY // 2} moves and answered with the same "
-               f"move, losing ≥ {LEAK_MIN_CPL / 100:.1f} pawns of evaluation on "
-               f"average each time — repertoire habits, not one-off slips. Click "
-               f"a row to open the games on the board at that exact position, "
-               f"with the engine's preferred move arrowed."),
+               f"move, losing {LEAK_MIN_CPL / 100:.1f} pawns of evaluation or more on "
+               f"average — habits, not one-off slips. Book moves (what strong players "
+               f"play there) are left out however the engine scores them. Click a row "
+               f"to open the games at that position, with the engine's move arrowed."),
         W.drilltable(["You play", "Position", "Times", "Avg pawns lost",
                       "Engine prefers", "Your score (W-D-L)"], rows),
     ]}]

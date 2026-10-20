@@ -1,9 +1,10 @@
 """Where your win chance goes, against players at your rating, on equal terms.
 
 **The currency.** Every move changes the engine's win chance for the side that
-played it. Summed over your own moves, what you lose is what your play gave
-away — the same points `opening.py` calibrates against score. It is split
-three ways, each a partition of the same total:
+played it (`glossary`: the evaluation as a percentage, 50% = level). What a
+move lowers it by is what the move gave away; averaged over your moves, it is
+your win chance lost per move — the quantity Lichess accuracy is built from.
+It is split three ways, each a partition of the same total:
 
 * by **phase** — the position the move was played in (`phases`);
 * by **situation** — ahead, level or behind (engine eval before the move);
@@ -16,12 +17,12 @@ win chance just handed to you is easiest to hand back), and the overall total.
 at the same depth and the same time control, and each of your games is
 compared with corpus players *at the rating you had in that game*: a player
 who climbed 400 points would otherwise have their early games judged against
-their current band. The gap is your points minus theirs, per game; its interval
-is a bootstrap over your games, with the corpus's own sampling error added.
+their current level. The gap is your loss per move over theirs, minus one; its
+interval is a bootstrap over your games.
 
-Results are never compared: inside a band everyone scores about 50%, so being
-better at one thing means being worse at another. Points lost are measured
-directly, so that compensation cannot hide in them.
+Results are never compared: against players at your own rating everyone
+scores about 50%, so being better at one thing means being worse at another.
+Win chance lost is measured directly, so that compensation cannot hide in it.
 """
 from __future__ import annotations
 
@@ -32,30 +33,34 @@ from bisect import bisect_left, bisect_right
 
 from . import store
 from .clocks import parse_time_control
-from .enrich.engine import win_prob
+from .enrich.engine import MISTAKE, win_prob
 
 LEDGER_VERSION = 1
 CLAMP = 1000              # centipawns; a mate score stops being informative here
 AHEAD = 150               # eval before the move, mover's view: ahead / behind
-ERROR = 10.0              # an opponent move losing this much is a "mistake" to punish
+ERROR = MISTAKE           # an opponent move losing this much is a mistake to punish
 TROUBLE, LOW = 0.10, 0.25 # fractions of the starting clock
 
-# (key, group, label, what it means)
+# (key, group, label, what it means) — the thresholds above, in words
 BUCKETS = [
-    ("total", "Overall", "Every move", "All the win chance your moves gave away."),
+    ("total", "Overall", "Every move", "All your moves."),
     ("op", "Phase", "Opening", "Moves played before the middlegame began."),
-    ("mg", "Phase", "Middlegame", "From development to the endgame."),
-    ("eg", "Phase", "Endgame", "Six or fewer pieces besides kings and pawns."),
+    ("mg", "Phase", "Middlegame", "From the middlegame's start to the endgame's."),
+    ("eg", "Phase", "Endgame", "Six or fewer pieces left besides kings and pawns."),
     ("ahead", "Situation", "When ahead",
-     "Moves played at +1.5 or better — converting."),
-    ("level", "Situation", "When level", "Moves played within ±1.5."),
+     f"Moves played at +{AHEAD / 100:.1f} or better — converting an advantage."),
+    ("level", "Situation", "When level",
+     f"Moves played between −{AHEAD / 100:.1f} and +{AHEAD / 100:.1f}."),
     ("behind", "Situation", "When behind",
-     "Moves played at −1.5 or worse — defending."),
-    ("comfortable", "Clock", "Clock comfortable", "More than a quarter of the clock left."),
-    ("low", "Clock", "Clock low", "Between a tenth and a quarter of the clock left."),
-    ("trouble", "Clock", "Time trouble", "Under a tenth of the clock left."),
+     f"Moves played at −{AHEAD / 100:.1f} or worse — defending."),
+    ("comfortable", "Clock", "Clock comfortable",
+     f"More than {LOW:.0%} of your starting time left."),
+    ("low", "Clock", "Clock low",
+     f"Between {TROUBLE:.0%} and {LOW:.0%} of your starting time left."),
+    ("trouble", "Clock", "Time trouble", f"Under {TROUBLE:.0%} of your starting time left."),
     ("reply", "Chances", "Replies to their mistakes",
-     "Your move right after the opponent dropped 10% or more — punishing it."),
+     f"Your move right after the opponent's move cost them {ERROR:.0f}% win chance "
+     f"or more — the chance to punish it."),
 ]
 LABELS = {k: lbl for k, _, lbl, _ in BUCKETS}
 
@@ -66,7 +71,8 @@ BOOT = 1000
 # --- one side of one game ------------------------------------------------------
 
 def side_ledger(evals, division, color, clocks=None, base=None) -> dict:
-    """{bucket: [win-chance points lost, moves]} for one side of one game.
+    """{bucket: [win chance lost (percentage points), moves]} for one side of
+    one game.
 
     `evals` is the white-POV array (plies + 1), `division` a `phases.Division`,
     `clocks` the seconds left after each of this side's moves (or None) and
@@ -312,6 +318,7 @@ def compare(user: str, depth: int | None = None, time_control: str | None = None
             "control": round(ctrl - 1, 3), "net": round(net - 1, 3),
             "lo": round(lo, 3), "hi": round(hi, 3),
             "verdict": "leak" if lo > 0 else "strength" if hi < 0 else "level",
+            "moves": m, "games": len(per),
             "freq_you": round(m / len(per), 2),
             "freq_peers": round(sum(t[6] for t in per) / len(per), 2),
             "per_game_you": round(a / len(per), 1),
@@ -395,8 +402,8 @@ def focus(result: dict, k: int = 3) -> dict:
 
 
 def ladder(depth: int | None = None, time_control: str | None = None) -> list[dict]:
-    """Mean points lost per game, by band — the validation that the measure
-    tracks strength at all."""
+    """Mean win chance lost per game, by rating band — the check that the
+    measure tracks strength at all."""
     from . import corpus as C
 
     cohort = _corpus(depth or C.DEPTH, time_control or C.TIME_CONTROL)

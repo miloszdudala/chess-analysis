@@ -48,8 +48,9 @@ def test_opponent_strength_uses_pre_game_ratings():
     """Chess.com Elo headers are post-game; the gap must be reconstructed.
 
     Game 2: you (2000 pre) beat a 2050-pre opponent. Post-game the headers say
-    you 2008 vs them 2042 — a +34 'Similar' gap — but the real pre-game gap
-    was +50, the 'Stronger' bucket.
+    you 2008 vs them 2042 — a +34 gap — but the real pre-game gap was +50.
+    Game 3: you (2008 pre) lose to a 2030-pre opponent; post-game they read
+    2038, which would put a level game (+22) among the stronger ones (+38).
     """
     from chessanalysis.metrics.player.opponents import by_opponent_strength
 
@@ -58,8 +59,12 @@ def test_opponent_strength_uses_pre_game_ratings():
             self.outcome, self.user_elo, self.opp_elo = outcome, user_elo, opp_elo
 
     games = [G("win", 2000, 1900),          # baseline: sets your pre for game 2
-             G("win", 2008, 2042)]          # post ratings after a win (Δ = +8)
-    table = by_opponent_strength(_ctx(games))
+             G("win", 2008, 2042),          # post ratings after a win (Δ = +8)
+             G("loss", 2000, 2038)]         # post ratings after a loss (Δ = −8)
+    table = [w for w in by_opponent_strength(_ctx(games)) if w["type"] == "table"][0]
     rows = {r[0]: r for r in table["rows"]}
-    assert "Stronger (+50…+150)" in rows            # pre-game gap +50
-    assert rows["Stronger (+50…+150)"][2] == 1      # ...with the win counted there
+    stronger, level = rows["Stronger (25–100 above)"], rows["Level (within ±25)"]
+    assert stronger[1] == 1 and stronger[3] == 1     # the win, at its pre-game +50
+    assert level[1] == 1 and level[5] == 1           # the loss, at its pre-game +22
+    assert stronger[8] == "+8.0" and level[8] == "−8.0"
+    assert stronger[7] == "43%"                      # Elo expectation at +50

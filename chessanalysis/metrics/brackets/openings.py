@@ -1,11 +1,14 @@
-"""The opening: how strong yours is, how wide, and what it is worth.
+"""The opening: how much it costs you, how varied it is, and whether theory pays.
 
 Everything here is measured, for you and for the corpus, by `opening.py` against
-the same book and the same engine depth. See its docstring for why results are
-not compared directly inside a band, and what is measured instead.
+the same book and the same engine depth. The units are the app's own
+(`glossary`): win chance in %, score in %, evaluations in pawns. Every
+conclusion in the text is drawn from the numbers beside it and their 95%
+range — nothing is asserted that the data on the page does not show.
 """
 from collections import Counter, defaultdict
 
+from ... import glossary as G
 from ... import opening as op
 from ... import widgets as W
 from ...corpus import BAND_SIZE
@@ -13,6 +16,7 @@ from ...registry import metric
 
 MIN_FAMILY = 5       # your games in an opening before it gets its own row
 MIN_PEER = 10        # peer samples in an opening before its peer column is shown
+MOVES = op.CHECK // 2
 
 
 def _records(ctx):
@@ -35,8 +39,17 @@ def _pct(x):
     return "—" if x is None else f"{100 * x:.0f}%"
 
 
+def _wc(x, digits=1):
+    """Win chance or score, already in percent: 22.2 -> '22.2%'."""
+    return "—" if x is None else f"{x:.{digits}f}%"
+
+
 def _num(x, digits=1):
     return "—" if x is None else f"{x:.{digits}f}"
+
+
+def _signed(x, digits=1, unit="%"):
+    return f"{x:+.{digits}f}{unit}".replace("-", "−")
 
 
 def _clock(sec):
@@ -44,9 +57,14 @@ def _clock(sec):
 
 
 def _range(v, digits=1):
-    """'+1.9 (+0.5 to +3.5)' from (estimate, low, high)."""
+    """'+1.9% (+0.5% to +3.5%)' from (estimate, low, high)."""
     e, lo, hi = v
-    return f"{e:+.{digits}f} ({lo:+.{digits}f} to {hi:+.{digits}f})"
+    return f"{_signed(e, digits)} ({_signed(lo, digits)} to {_signed(hi, digits)})"
+
+
+def _clear(v):
+    """Whether a (estimate, low, high) range stays on one side of zero."""
+    return v[1] > 0 or v[2] < 0
 
 
 def _gap(mine, theirs, key):
@@ -58,108 +76,91 @@ def _gap(mine, theirs, key):
     return a[0] - b[0], (a[1] ** 2 + b[1] ** 2) ** 0.5
 
 
-def _elo(points, cal):
-    """Win-chance points at move 12 -> Elo, through what they are worth here."""
-    return points * cal["k"][op.CHECK] * op.ELO_PER_POINT
+def _who(ctx):
+    return ctx.who[0].upper() + ctx.who[1:]
 
 
-@metric("brackets", title="Your opening, measured", order=40)
+@metric("brackets", title=f"Your opening: moves 1–{MOVES}", order=40)
 def strength(ctx):
     if ctx.scope != "peers" or not ctx.user:
         return None
     every, corpus = _records(ctx)
     band = _band(corpus, ctx.lo, ctx.hi)
-    # points need the engine; the book facts do not, so they use every game
+    # win chance needs the engine; the book facts do not, so they use every game
     mine = [r for r in every if r["own_op"] is not None]
     peers = [r for r in band if r["own_op"] is not None]
     if len(mine) < 10 or len(peers) < 50:
         return None
-    cal, sp = op.calibration(corpus), op.spreads(corpus)
     me, co = op.summary(mine), op.summary(peers)
     me_all, co_all = op.summary(every), op.summary(band)
     for r in mine + peers:
         r["net_op"] = r["opp_op"] - r["own_op"]
 
-    def spread(key, elo=True):
-        if key not in sp:
-            return "—"
-        sd = sp[key][0]
-        return f"{sd:.1f} (≈ {_elo(sd, cal):.0f} Elo)" if elo else _clock(sd)
-
-    def gap_row(label, key, better_low, spread_key):
+    def gap_row(label, key):
         g = _gap(mine, peers, key)
         if not g:
             return None
         d, ci = g
-        elo = _elo(-d if better_low else d, cal)
-        return [label, _num(_mean(mine, key)), _num(_mean(peers, key)),
-                f"{d:+.1f} ± {ci:.1f}", f"{elo:+.0f} ± {_elo(ci, cal):.0f}",
-                spread(spread_key)]
+        return [label, _wc(_mean(mine, key)), _wc(_mean(peers, key)),
+                f"{_signed(d)} ({_signed(d - ci)} to {_signed(d + ci)})"]
 
     rows = [r for r in (
-        gap_row("Points you give away, moves 1–12", "own_op", True, "own_op"),
-        gap_row("Points your opponents give away", "opp_op", False, "opp_op"),
-        gap_row("Net: what the opening hands you", "net_op", False, "net"),
+        gap_row("Win chance your moves give away", "own_op"),
+        gap_row("Win chance your opponents' moves give away", "opp_op"),
+        gap_row("Net: your opponents' total minus yours", "net_op"),
     ) if r]
     clock = _gap([r for r in mine if r["clock12"] is not None],
                  [r for r in peers if r["clock12"] is not None], "clock12")
     if clock:
-        rows.append(["Clock for moves 1–12", _clock(me["clock12"]), _clock(co["clock12"]),
-                     f"{clock[0]:+.0f} s ± {clock[1]:.0f}", "", spread("clock12", elo=False)])
+        d, ci = clock
+        rows.append([f"Clock used on moves 1–{MOVES}", _clock(me["clock12"]),
+                     _clock(co["clock12"]),
+                     f"{_signed(d, 0, ' s')} ({_signed(d - ci, 0, ' s')} to "
+                     f"{_signed(d + ci, 0, ' s')})"])
 
     depth_me, depth_co = op.theory_depth(every), op.theory_depth(band)
     rows += [
-        ["Theory depth (median own book moves)", _num(depth_me["median"], 0),
-         _num(depth_co["median"], 0), "", "", ""],
-        ["You leave the book first", _pct(me_all["left"]), _pct(co_all["left"]),
-         "", "", ""],
-        ["What leaving costs (pawns)", _num(me["cost"] and me["cost"] / 100, 2),
-         _num(co["cost"] and co["cost"] / 100, 2), "", "", ""],
-        ["After move 12: points you lose per move", _num(me["rest_per_move"], 2),
-         _num(co["rest_per_move"], 2), "", "", ""],
+        ["Book moves you play (median)", _num(depth_me["median"], 0),
+         _num(depth_co["median"], 0), ""],
+        ["Games where you leave the book first", _pct(me_all["left"]),
+         _pct(co_all["left"]), ""],
+        ["What leaving the book costs (pawns, on average)",
+         _num(me["cost"] and me["cost"] / 100, 2), _num(co["cost"] and co["cost"] / 100, 2), ""],
     ]
 
-    intro = (f"What the opening hands you, measured in the engine's win chance "
-             f"(points out of 100) summed over moves 1–12 — not in results, because "
-             f"inside a band everyone scores about 50% and better openings have to "
-             f"be paid for somewhere else. Players at your rating means "
-             f"{ctx.lo}–{ctx.hi}, {len(peers)} games, same engine and depth. Elo is "
-             f"what the points are worth at this level, everything else equal. "
-             f"The last column is how much players at the same rating really "
-             f"differ (one standard deviation, game-to-game luck taken out). Theory "
-             f"depth counts your book moves only while your opponent is still in "
-             f"book too, so their early departures do not cap it.")
+    two = G.win_chance_edge_in_pawns(2.0)
+    intro = (f"Your first {MOVES} moves against {ctx.who} ({len(peers)} of their games), "
+             f"same engine and depth. Every move changes the win chance — the "
+             f"evaluation as a percentage, 0.00 being 50%. The first two rows add up, "
+             f"per game, what your moves and your opponents' moves gave away in moves "
+             f"1–{MOVES}; the third is the difference, so a positive number means you "
+             f"come out of the opening better than you went in. For scale, a 2% edge "
+             f"in win chance is about +{two:.2f} pawns. Book moves count only while "
+             f"your opponent is still in book too, so their early departures do not "
+             f"cut your count short.")
 
     said = []
     g = _gap(mine, peers, "own_op")
     if g and abs(g[0]) > g[1]:
-        said.append(f"You make {'fewer' if g[0] < 0 else 'more'} opening errors than "
-                    f"players at your rating: {abs(g[0]):.1f} points a game, worth "
-                    f"about {abs(_elo(g[0], cal)):.0f} Elo.")
+        said.append(f"You give away {abs(g[0]):.1f}% {'less' if g[0] < 0 else 'more'} "
+                    f"win chance in the opening than {ctx.who}, and the 95% range "
+                    f"rules out chance.")
     elif g:
-        said.append("Your opening errors are within noise of your band's.")
-    if "own_opp_corr" in sp and "net" in sp:
-        corr = min(sp["own_opp_corr"][0], 1.0)
-        said.append(f"Players who err more in their openings also get more errors "
-                    f"out of their opponents (a correlation of {corr:.2f} between "
-                    f"players): sharp openings cut both ways. That is why what the "
-                    f"opening nets varies so little between players at the same "
-                    f"rating — about {_elo(sp['net'][0], cal):.0f} Elo — against "
-                    f"{_elo(sp['own_op'][0], cal):.0f} for the errors alone.")
-    if me["rest_per_move"] and co["rest_per_move"]:
-        rel = me["rest_per_move"] / co["rest_per_move"] - 1
-        said.append(f"After move 12 you lose {me['rest_per_move']:.2f} points a move "
-                    f"against {co['rest_per_move']:.2f} for your band "
-                    f"({100 * rel:+.0f}%).")
-    out = [W.text(intro),
-           W.table(["Measure", "You", "Players at your rating", "Gap (95%)",
-                    "Gap in Elo", "Real spread at one rating"], rows)]
+        said.append(f"How much win chance you give away in the opening is within chance "
+                    f"of {ctx.who}.")
+    n = _gap(mine, peers, "net_op")
+    if n and abs(n[0]) > n[1]:
+        said.append(f"Counting your opponents' moves too, you come out of the opening "
+                    f"{abs(n[0]):.1f}% {'better' if n[0] > 0 else 'worse'} off than they "
+                    f"do — beyond chance.")
+    out = [W.text(intro, guide="win-chance", label="What win chance means"),
+           W.table(["", "You", _who(ctx), "Difference (95% range)"], rows)]
     if said:
         out.append(W.text(" ".join(said)))
     return out
 
 
-@metric("brackets", title="Your repertoire to move 10", order=41)
+@metric("brackets", title="How varied your openings are", order=41)
 def repertoire(ctx):
     if ctx.scope != "peers" or not ctx.user:
         return None
@@ -173,44 +174,47 @@ def repertoire(ctx):
         if not me or len(theirs) < 30:
             continue
         more_varied = sum(t < me["moves"] for t in theirs) / len(theirs)
-        said[color] = (me["moves"], theirs[len(theirs) // 2])
+        said[color] = (me["moves"], theirs)
         rows.append([label, _pct(me["moves"]), _pct(theirs[len(theirs) // 2]),
                      f"{_pct(theirs[len(theirs) // 4])}–{_pct(theirs[3 * len(theirs) // 4])}",
                      _pct(more_varied)])
     me = op.windowed_similarity(mine)
     pawns = sorted(s["pawns"] for s in op.player_similarities(corpus) if s["pawns"] is not None)
     if me and me["pawns"] is not None and len(pawns) >= 30:
-        rows.append(["Pawn structure after move 10", _pct(me["pawns"]),
+        rows.append([f"Pawn structure after move {op.REP_MOVES}", _pct(me["pawns"]),
                      _pct(pawns[len(pawns) // 2]),
                      f"{_pct(pawns[len(pawns) // 4])}–{_pct(pawns[3 * len(pawns) // 4])}",
                      _pct(sum(t < me["pawns"] for t in pawns) / len(pawns))])
     if not rows:
         return None
 
-    intro = ("At this level exact positions stop repeating by move 7 — your "
-             "opponents see to that — so a repertoire to move 10 cannot be read "
-             "off positions. This reads what you control: your own first ten moves "
-             "(which piece to which square, in any order), compared between your "
-             "games where the opponent made the same first move, over every stretch "
-             f"of {op.WINDOW} games — the same footing as the corpus players' "
-             f"{op.WINDOW} games. A London or a fixed Closed Sicilian setup scores "
-             "around 80%; fixing only the first move or two, around 35%. The pawn "
-             "structure row is the other side of it: how alike the positions you "
-             "end up in are.")
+    intro = (f"How much your own first {op.REP_MOVES} moves repeat between games that "
+             f"began the same way (your opponent's first move was the same): which "
+             f"piece goes to which square, in any order. 100% would be the identical "
+             f"setup every time. It is measured over every run of {op.WINDOW} "
+             f"consecutive games — as many as the corpus holds per player — so you and "
+             f"the other players are measured on the same footing. The pawn-structure "
+             f"row compares the pawns after move {op.REP_MOVES} the same way.")
     out = [W.text(intro),
-           W.table(["How alike your games are", "You", "Players (median)",
-                    "Middle half", "Players more varied than you"], rows)]
+           W.table(["How alike your games are", "You", "Typical player (median)",
+                    "Middle half of players", "Players who vary more than you"], rows)]
 
     white = Counter(r["first"] for r in mine if r["color"] == "white" and r["first"])
     if "white" in said and white:
         mv, n = white.most_common(1)[0]
-        mine_s, theirs_s = said["white"]
-        shape = ("you fix the first move and improvise after it" if mine_s < theirs_s
-                 else "you keep to a set system well past the first move")
+        mine_s, theirs = said["white"]
+        q1, q3 = theirs[len(theirs) // 4], theirs[3 * len(theirs) // 4]
+        shape = ("after the first move you vary more than three players in four"
+                 if mine_s < q1 else
+                 "after the first move you keep to a set system more than three players in four"
+                 if mine_s > q3 else
+                 "inside the middle half of players, so after the first move you vary "
+                 "about as much as most")
         out.append(W.text(f"As White you opened 1.{mv} in {n} of {sum(white.values())} "
-                          f"games, yet by move 10 your moves overlap {_pct(mine_s)} "
-                          f"between games that started alike, against "
-                          f"{_pct(theirs_s)} for the typical player: {shape}."))
+                          f"games; by move {op.REP_MOVES} your moves overlap "
+                          f"{_pct(mine_s)} between games that began the same way, "
+                          f"against {_pct(theirs[len(theirs) // 2])} for the typical "
+                          f"player — {shape}."))
     return out + _by_opening(ctx, mine, corpus)
 
 
@@ -224,8 +228,8 @@ def _by_opening(ctx, mine, corpus):
     for r in peers:
         peer_groups[(r["family"], r["color"])].append(r)
 
-    def pair(m, p, key):
-        return f"{_num(m[key])} / {_num(p[key]) if p else '—'}"
+    def pair(m, p, key, fmt=_wc):
+        return f"{fmt(m[key])} / {fmt(p[key]) if p else '—'}"
 
     rows, other = [], []
     for key, recs in sorted(groups.items(), key=lambda kv: -len(kv[1])):
@@ -235,27 +239,29 @@ def _by_opening(ctx, mine, corpus):
         m = op.summary(recs)
         p = op.summary(peer_groups[key]) if len(peer_groups[key]) >= MIN_PEER else None
         rows.append([key[0], key[1].title(), m["n"], op.bucket_of(pop, key[0]),
-                     pair(m, p, "own_op"), pair(m, p, "opp_op"), pair(m, p, "book"),
+                     pair(m, p, "own_op"), pair(m, p, "opp_op"), pair(m, p, "book", _num),
                      _pct(m["score"])])
     if other:
         m = op.summary(other)
         rows.append([f"Everything else ({len({r['family'] for r in other})} openings)", "",
-                     m["n"], "", f"{_num(m['own_op'])} / —", f"{_num(m['opp_op'])} / —",
+                     m["n"], "", f"{_wc(m['own_op'])} / —", f"{_wc(m['opp_op'])} / —",
                      f"{_num(m['book'])} / —", _pct(m["score"])])
     if not rows:
         return []
-    return [W.text("By opening, you / players at your rating in the same opening "
-                   "with the same colour. Points are summed over moves 1–12; book "
-                   "moves are your own."),
+    return [W.text(f"By opening: you / {ctx.who} in the same opening with the same "
+                   f"colour (— where they have fewer than {MIN_PEER} games). Win chance "
+                   f"is added up over moves 1–{MOVES}, as above. How common is read off "
+                   f"the other players' games: the mainstream openings together make up "
+                   f"{100 * op.MAINSTREAM:.0f}% of them, a niche one under "
+                   f"{100 * op.NICHE:g}% each. Your score is wins plus half the draws."),
             W.table(["Opening", "Colour", "Games", "How common",
-                     "Points you give away", "Points they give away", "Book moves",
-                     "Your score"], rows)]
+                     "Win chance your moves give away", "Win chance their moves give away",
+                     "Book moves", "Your score"], rows)]
 
 
-@metric("brackets", title="What the opening is worth", order=43)
+@metric("brackets", title="Does knowing more theory pay?", order=43)
 def worth(ctx):
     _, corpus = _records(ctx)
-    cal = op.calibration(corpus)
     pop = op.popularity(corpus)
     groups = [("All openings", lambda r: True),
               ("Mainstream", lambda r: op.bucket_of(pop, r["family"]) == "Mainstream"),
@@ -267,72 +273,76 @@ def worth(ctx):
     rows = [[label, c["players"], _range(c["op"]), _range(c["mg"]), _range(c["rest"]),
              _range(c["result"])] for label, c in found]
     allc = found[0][1]
-    k, kw = cal["k"][op.CHECK], cal["k_within"]
-
-    first = (f"A point of win chance at move 12 is worth {k:.2f} of a point of score "
-             f"at this level — there is a whole game left to play — and {kw:.2f} "
-             f"inside the same player's games, so it is not the band effect (better "
-             f"openings, worse afterwards) that flattens it. Near 50% a point of "
-             f"score is about {op.ELO_PER_POINT:.0f} Elo.")
-
     o, m, res = allc["op"], allc["mg"], allc["result"]
-    verdict = (f"Knowing the line longer than your opponent is worth {o[0]:+.1f} points "
-               f"at move 12 (about {o[0] * op.ELO_PER_POINT:.0f} Elo in that game). ")
-    if m[1] < 0 < m[2]:
-        verdict += (f"It does not carry into the middlegame: moves 13–32 come out at "
-                    f"{m[0]:+.1f} ({m[1]:+.1f} to {m[2]:+.1f}), which rules out a "
-                    f"better-plan effect bigger than {m[2]:.0f} points. ")
-    elif m[1] > 0:
-        verdict += f"And it carries on: moves 13–32 add {m[0]:+.1f}. "
-    verdict += (f"The result alone could never have settled this — its interval is "
-                f"{(res[2] - res[1]) / 2:.0f} points either way, several times the "
-                f"effect.")
+    elo = op.ELO_PER_POINT
+
+    intro = (f"Each of the other players is compared with themselves: their games where "
+             f"the opponent left the book first, against their games where they left it "
+             f"first. The same player on both sides, so their strength and style are "
+             f"held fixed. The numbers are expected score — the share of the points "
+             f"(win 1, draw ½) a position is worth, read from the engine's evaluation "
+             f"and checked against how games from such positions actually ended at "
+             f"this level. The four columns add up to the difference in the final "
+             f"result.")
+
+    said = []
+    if _clear(o):
+        k = op.calibration(corpus)["k"][op.CHECK]
+        pawns = G.win_chance_edge_in_pawns(o[0] / k) if k else None
+        said.append(f"At move {MOVES} the player who stayed in book longer stands "
+                    f"{'better' if o[0] > 0 else 'worse'}: {_range(o)} expected score"
+                    + (f", about what a {pawns:+.2f} pawn edge is worth" if pawns else "")
+                    + f" — roughly {abs(o[0]) * elo:.0f} Elo of performance in that game.")
+    else:
+        said.append(f"At move {MOVES} there is no measurable difference: {_range(o)}.")
+    if not _clear(m):
+        said.append(f"In moves {MOVES + 1}–{op.MID // 2} it neither grows nor shrinks "
+                    f"measurably: {_range(m)}.")
+    else:
+        said.append(f"In moves {MOVES + 1}–{op.MID // 2} it "
+                    f"{'grows' if m[0] > 0 else 'is given back'}: {_range(m)}.")
+    if _clear(res):
+        said.append(f"It shows in the final results: {_range(res)}.")
+    else:
+        said.append(f"The final results cannot show an effect this small: they differ "
+                    f"by {_range(res)}, a range many times wider than the move-{MOVES} "
+                    f"edge.")
     by = dict(found)
     if "Mainstream" in by and "Uncommon and niche" in by:
         a, b = by["Mainstream"]["op"], by["Uncommon and niche"]["op"]
         same = a[1] < b[0] < a[2] or b[1] < a[0] < b[2]
-        verdict += (" In uncommon openings it is the same as in mainstream ones."
+        said.append("Mainstream and less common openings do not differ measurably."
                     if same else
-                    f" In uncommon openings it is {abs(b[0] - a[0]):.1f} points "
-                    f"{'more' if b[0] > a[0] else 'less'} than in mainstream ones.")
+                    f"In less common openings the move-{MOVES} edge is "
+                    f"{abs(b[0] - a[0]):.1f}% {'larger' if b[0] > a[0] else 'smaller'} "
+                    f"than in mainstream ones.")
 
-    out = [W.text(first), W.text(verdict),
-           W.table(["Openings", "Players", "At move 12", "Moves 13–32",
-                    "After move 32 and clock", "Result"], rows)]
+    out = [W.text(intro, guide="score", label="What expected score means"),
+           W.text(" ".join(said)),
+           W.table(["Openings", "Players", f"At move {MOVES}",
+                    f"Moves {MOVES + 1}–{op.MID // 2}",
+                    f"After move {op.MID // 2}, incl. the clock", "Final result"], rows)]
 
-    if ctx.scope == "peers" and ctx.user:
+    if ctx.scope == "peers" and ctx.user and _clear(o):
         mine, _ = _records(ctx)
         left = op._mean([1.0 if r["left"] else 0.0 for r in mine])
         if left:
             gain = left * o[0]
             out.append(W.text(
-                f"What perfect theory would be worth to you: you leave the book first "
-                f"in {_pct(left)} of your games. Turning every one of those into a "
-                f"game where your opponent leaves first instead is worth at most "
-                f"{gain:.1f} points a game — about {gain * op.ELO_PER_POINT:.0f} Elo."))
+                f"For you: you leave the book first in {_pct(left)} of your games. Had "
+                f"your opponent left it first instead in every one of them, the move-"
+                f"{MOVES} edge would be worth at most {gain:.1f}% expected score a game "
+                f"— about {gain * elo:.0f} Elo — and, by the table, less by the end."))
 
-    note = ("How this is measured: each corpus player is compared with themselves — "
-            "the games where the opponent left the book first against the games "
-            "where they did — so their own strengths and weaknesses are held fixed. "
-            "Points are score points against the colour's average. One bias is left "
-            "and its direction is known: an opponent who leaves the book first is, a "
-            "little, likelier to be a weaker opening player and so, at the same "
-            "rating, a stronger one afterwards — which makes the later columns "
-            "understate any edge, not overstate it.")
-    rel = op.reliability(corpus)
-    if rel and rel["games_for_06"]:
-        note += (f" The other design — players alike in the rest of the game but "
-                 f"different in the opening, compared by rating — needs the rest of "
-                 f"the game measured reliably, and {op.WINDOW} games do not: the two "
-                 f"halves of a player's games agree at r = {rel['split']:.2f}. "
-                 f"Matching on a measure that is mostly noise leaves the rest of the "
-                 f"game uncontrolled and credits the opening with it. It would take "
-                 f"about {rel['games_for_06']:.0f} games per player.")
-    out.append(W.text(note))
+    out.append(W.text(
+        "One bias is left and its direction is known: an opponent who leaves the book "
+        "first is, a little, likelier to be a weaker opening player and so, at the same "
+        "rating, a stronger one afterwards. That works against the player who knew the "
+        "line longer in the later columns, so an edge there is if anything understated."))
     return out
 
 
-@metric("brackets", title="The opening, band by band", order=41)
+@metric("brackets", title="The opening at each rating", order=41)
 def by_band(ctx):
     if ctx.scope != "ladder" or not ctx.bands:
         return None
@@ -344,23 +354,26 @@ def by_band(ctx):
         if len(recs) < 50:
             continue
         s, depth = op.summary(recs), op.theory_depth(recs)["median"]
-        ends.append((lo, s["own_op"], depth, s["clock12"]))
-        rows.append([f"{lo}–{hi}", s["n"], _num(depth, 0),
-                     _num(s["own_op"]), _clock(s["clock12"]), _pct(s["left"]),
+        ends.append((f"{lo}–{hi}", s["own_op"], depth, s["clock12"]))
+        rows.append([f"{lo}–{hi}", s["n"], _num(depth, 0), _wc(s["own_op"], 0),
+                     _clock(s["clock12"]), _pct(s["left"]),
                      _num(s["cost"] and s["cost"] / 100, 2)])
     if not rows:
         return None
-    (lo0, err0, d0, c0), (lo1, err1, d1, c1) = ends[0], ends[-1]
-    trend = (f"From {lo0} to {lo1}, the points given away in the opening fall from "
-             f"{err0:.0f} to {err1:.0f} a game and theory depth goes from {d0} to {d1} "
-             f"moves, while the clock spent on it stays at about {_clock(c0)}–"
-             f"{_clock(c1)}: stronger players know more and err less in the opening, "
-             f"without taking longer over it. ")
+    text = (f"Win chance is what a player's own moves 1–{MOVES} gave away, added up per "
+            f"game. Book moves are a player's own moves in book, counted only while the "
+            f"opponent was in book too (the median). Each game counts once for each "
+            f"player.")
+    if len(ends) > 1:
+        (r0, err0, d0, c0), (r1, err1, d1, c1) = ends[0], ends[-1]
+        text = (f"From {r0} to {r1}: the win chance given away in moves 1–{MOVES} goes "
+                f"from {err0:.0f}% to {err1:.0f}% a game, the median number of book "
+                f"moves from {d0} to {d1}, and the clock used on those moves from "
+                f"{_clock(c0)} to {_clock(c1)}. " + text)
     return [
-        W.text(trend + "Theory depth is the median number of your own book moves, "
-               "counted only while the opponent is still in book too. Points are the "
-               "engine's win chance given away on your own moves 1–12."),
-        W.table(["Band", "Samples", "Theory depth", "Points given away, moves 1–12",
-                 "Clock for moves 1–12", "Leave the book first",
+        W.text(text),
+        W.table(["Rating", "Game sides", "Book moves (median)",
+                 f"Win chance given away, moves 1–{MOVES}",
+                 f"Clock used, moves 1–{MOVES}", "Leave the book first",
                  "What leaving costs (pawns)"], rows),
     ]

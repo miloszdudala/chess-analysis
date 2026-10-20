@@ -1,38 +1,41 @@
 """Opening strength and repertoire, measured so that they can be compared.
 
-**Why results are not compared.** Inside a rating band everyone scores about
-50% — that is what a rating is. A player there with better openings has to be
-worse somewhere else, so "do the players who know more theory win more?"
-answers itself, and a table of results by opening knowledge measures nothing.
-Three things can be measured instead.
+Units are the app's (`glossary`): win chance in % (the evaluation as a
+percentage), score in % (wins plus half the draws).
 
-**What the opening hands you, in points.** Every move changes the engine's win
-chance. Summed over moves 1–12, what you lose on your own moves are your
+**Why results are not compared.** Against players at your own rating everyone
+scores about 50% — that is what a rating is. A player there with better
+openings has to be worse somewhere else, so "do the players who know more
+theory win more?" answers itself, and a table of results by opening knowledge
+measures nothing. Three things can be measured instead.
+
+**What the opening hands you, in win chance.** Every move changes the engine's
+win chance. Summed over moves 1–12, what you lose on your own moves are your
 opening errors, what your opponents lose is what your openings get out of
-them, and the difference is the opening's net contribution. The win chance is
-the engine's, so it is checked against what actually happened: at this level a
-point of win chance at move 12 is worth about 0.8 of a point of score, because
-a whole game is still to be played. The same holds inside one player's games,
-so it is not the band effect in disguise. Near 50%, one point of score is about
-7 Elo.
+them, and the difference is the opening's net contribution.
 
-**How much players really differ.** Ten games are few, and most of what
-separates two players' ten-game averages is luck. Each player's games are split
-into two halves and only what the halves agree on — their covariance — counts
-as a real difference; with the rating trend taken out, that is the spread
-between players *at the same rating*.
+**Expected score.** Win chance is the engine's scale, so to compare it with
+results it is calibrated against them: `calibration` measures how much the
+actual score rises per 1% of win chance at moves 12 and 32 (less than 1%, as a
+whole game is still to be played), both across players and inside one
+player's games. That turns a position into the score games from it are
+expected to end with, and lets a game's result be split into what the
+opening, the middlegame and the rest each contributed.
 
-**What theory is worth.** Comparing one player with another brings the band
-problem back. Comparing a player with themselves — the games where the opponent
-left the book first against the games where they did — holds their whole skill
-profile fixed.
+**How much players really differ.** A handful of games per player is few, and
+most of what separates two players' averages is luck. `spreads` splits each
+player's games into two halves and counts only what the halves agree on —
+their covariance — as a real difference, with the rating trend taken out.
 
-**Repertoire** is read from the moves only you choose. At this level exact
-positions stop repeating by move 7 — the opponents see to that — so a
-repertoire "to move 10" cannot be read off positions. What you control can be:
-your own first ten moves, compared between games where the opponent made the
-same first move. System players (a London, a fixed Closed Sicilian setup) score
-around 80% on it; players who fix only their first moves score around 35%.
+**What theory is worth.** Comparing one player with another brings the
+compensation problem back. Comparing a player with themselves — the games
+where the opponent left the book first against the games where they did —
+holds their whole skill profile fixed (`theory_contrast`).
+
+**Repertoire** is read from the moves only you choose, since the opponents see
+to it that exact positions stop repeating within a few moves: your own first
+ten moves, compared between games where the opponent made the same first move
+(`similarity`).
 """
 from __future__ import annotations
 
@@ -53,7 +56,7 @@ MIN_GAMES = 8         # corpus games before a player counts as a player
 MAINSTREAM = 0.50     # the commonest families covering this share of games
 NICHE = 0.005         # families under this share of games
 BOOT = 400            # bootstrap resamples behind every interval
-ELO_PER_POINT = 400 / (math.log(10) * 0.25) / 100   # ≈ 6.95, near 50%
+ELO_PER_POINT = 400 / (math.log(10) * 0.25) / 100   # Elo per 1% of score, ≈ 6.95 near 50%
 
 _SQ = re.compile(r"[a-h][1-8]")
 
@@ -86,7 +89,7 @@ def record(game, color: str, evals: list[int] | None, player: str = "",
     """One side of one game: everything the opening statistics need.
 
     `evals` is the white-POV engine array (plies + 1 long) or None; without it
-    the record keeps the book, clock and repertoire facts but no points.
+    the record keeps the book, clock and repertoire facts but no win chance.
     """
     from .enrich.engine import win_prob
 
@@ -247,7 +250,7 @@ def bucket_of(pop: dict, family: str) -> str:
     return pop.get(family, "Niche")
 
 
-# --- points: calibration and the opening's share of the result -------------------
+# --- expected score: calibration and the opening's share of the result -----------
 
 def calibration(corpus: list[dict]) -> dict:
     """How engine win chance turns into score at this level.
@@ -288,7 +291,7 @@ def calibration(corpus: list[dict]) -> dict:
 
 
 def _checkpoint(rec, t, cal):
-    """Expected score (points) at ply t, or the result if the game was over."""
+    """Expected score (in %) at ply t, or the result if the game was over."""
     if rec["plies"] <= t:
         return 100 * rec["result"]
     wp = rec["wp24"] if t == CHECK else rec["wp64"]
@@ -303,7 +306,7 @@ def _ledger_raw(rec, cal):
 
 
 def ledger(rec, cal) -> dict | None:
-    """Score points this game gained or lost against its colour's average, by
+    """Score (in %) this game gained or lost against its colour's average, by
     stretch: the opening (to move 12), moves 13–32, and everything after
     including the clock. The three add up to the result's own excess."""
     if rec["wp24"] is None:
@@ -383,7 +386,7 @@ def spreads(corpus: list[dict]) -> dict:
 
 def theory_contrast(corpus: list[dict], keep=lambda r: True) -> dict | None:
     """Same player, two kinds of game: the opponent left the book first, or
-    they did. Score points by stretch, the first kind minus the second,
+    they did. Expected score by stretch, the first kind minus the second,
     averaged over players (weighted by how many of each they have), with a
     bootstrap over players for the interval.
 
@@ -511,7 +514,8 @@ def summary(recs: list[dict]) -> dict:
 
 
 def rest_per_move(recs: list[dict]) -> float | None:
-    """Win-chance points you lose per move after move 12."""
+    """Win chance (%) you lose per move after move 12, signed: a move the
+    engine liked better than its own previous evaluation counts as a gain."""
     moves = sum(r["rest_moves"] for r in recs if r["own_rest"] is not None)
     return sum(r["own_rest"] for r in recs if r["own_rest"] is not None) / moves if moves else None
 

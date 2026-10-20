@@ -1,7 +1,7 @@
 """How many of your games land in each accuracy band.
 
 A plain frequency count: group your games by the accuracy they scored and say
-how many fell in each bucket. The band's share sits alongside as context —
+how many fell in each bucket. The peers' share sits alongside as context —
 raw counts could not, since it holds a thousand games to your handful — so a
 bucket that is over- or under-represented in your play is visible without
 having to hold two averages in your head.
@@ -46,13 +46,13 @@ def distribution(ctx):
         mine_pct = 100 * n / len(mine)
         band_pct = 100 * bc.get(b, 0) / len(band)
         rows.append([_label(b), n, f"{mine_pct:.0f}%", f"{band_pct:.0f}%",
-                     f"{mine_pct - band_pct:+.0f}"])
+                     f"{mine_pct - band_pct:+.0f}".replace("-", "−")])
     # No chart underneath: it plotted the column beside it and nothing more.
     return [
-        W.text(f"Your {len(mine)} games grouped by the accuracy each one "
-               f"scored, against how the band's {len(band)} games fall. The "
-               f"band column is a share rather than a count — it holds a "
-               f"thousand games to your handful."),
-        W.table(["Accuracy", "Your games", "Share of yours", "Your band", "Gap"],
-                rows),
+        W.text(f"Your {len(mine)} games grouped by the accuracy you had in each, "
+               f"against the {len(band)} games of {ctx.who}. Theirs is a share, not a "
+               f"count, since there are many more of them; the difference is your "
+               f"share minus theirs."),
+        W.table(["Accuracy", "Your games", "Share of yours", "Share of theirs",
+                 "Difference"], rows),
     ]

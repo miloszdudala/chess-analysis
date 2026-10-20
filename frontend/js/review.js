@@ -108,7 +108,7 @@ export function buildReviewBoard(host, data) {
     } else {
       const m = moves[idx - 1], no = Math.ceil(idx / 2), dots = idx % 2 ? "." : "…";
       const qk = moveQual(m);
-      const tag = qk ? ` <span class="rv-tag rv-${qk}">${QUAL[qk]}${m.label !== "ok" ? ` −${m.wp_loss}%` : ""}</span>` : "";
+      const tag = qk ? ` <span class="rv-tag rv-${qk}" title="win chance this move gave away">${QUAL[qk]}${m.label !== "ok" ? ` −${m.wp_loss}% win chance` : ""}</span>` : "";
       const better = m.label !== "ok" && m.best_san && m.best_san !== m.san ? ` · best was <b class="mono">${esc(m.best_san)}</b>` : "";
       info.innerHTML = `<span class="rv-mv">${no}${dots} ${esc(m.san)}</span>${tag}` +
         `<span class="rv-tag rv-phase">${phaseAt(idx - 1)}</span>${better}`;

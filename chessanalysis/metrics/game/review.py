@@ -87,10 +87,13 @@ def summary(ctx):
                 f"{walk.plies // 2 + 1}")
         cards.append(W.card(walk.eco or "—", walk.name.split(":")[0], sub=left))
     if d["reached"]:
-        cards.append(W.card(f"move {d['move_no']}", f"Decisive (±{cp / 100:.0f})",
-                            sub=f"{d['side'].title()} · {'held' if d['held'] else 'lost it'}"))
+        side = d["side"].title()
+        cards.append(W.card(f"move {d['move_no']}", f"First winning advantage (±{cp / 100:.2f})",
+                            sub=f"{side} got it · " + ("and kept it" if d["held"] else
+                                                       "but it slipped away later")))
     else:
-        cards.append(W.card("—", f"Decisive (±{cp / 100:.0f})", sub="never crossed"))
+        cards.append(W.card("—", f"First winning advantage (±{cp / 100:.2f})",
+                            sub="neither side ever got one"))
 
     rows = []
     for side in ("white", "black"):
@@ -111,8 +114,9 @@ def summary(ctx):
     return [W.cards(cards),
             W.table(["Side", "Accuracy", "ACPL", "Top-3", "Opening", "Middlegame",
                      "Endgame", "Inacc.", "Mistakes", "Blunders"], rows),
-            W.text(note + " Phase columns are the mean accuracy of the moves played "
-                   "in that phase (and how many).")]
+            W.text(note + " Phase columns are the average accuracy of the moves played "
+                   "in that phase (and how many); ACPL is the average centipawn loss.",
+                   guide="win-chance-lost", label="What accuracy and ACPL are")]
 
 
 # move-quality palette (also fixes legend order)
@@ -164,8 +168,8 @@ def key_moments(ctx):
         return None
     items = [{"ply": m.ply, "label": _move_label(m), "kind": m.label,
               "mine": m.color == ctx.game.color,
-              "note": f"−{m.wp_loss:.0f}% · best {m.best_san}" if m.best_san
-                      else f"−{m.wp_loss:.0f}%"}
+              "note": f"−{m.wp_loss:.0f}% win chance · best {m.best_san}" if m.best_san
+                      else f"−{m.wp_loss:.0f}% win chance"}
              for m in sorted(moments, key=lambda m: m.ply)]
     out = [{"type": "moments", "items": items}]
     try:

@@ -17,9 +17,10 @@ const PAGES = {
   stats: () => import("./pages/stats.js"),
   peers: () => import("./pages/peers.js"),
   scout: () => import("./pages/scout.js"),
+  guide: () => import("./pages/guide.js"),
 };
 const TABS = [["overview", "Overview"], ["games", "Games"], ["openings", "Openings"],
-  ["train", "Train"], ["stats", "Stats"], ["peers", "Peers"], ["scout", "Scout"]];
+  ["train", "Train"], ["stats", "Stats"], ["peers", "Peers"], ["scout", "Scout"], ["guide", "Guide"]];
 const TAB_OF = { game: "games" };
 const FORMAT_LABELS = { rapid: "Rapid", blitz: "Blitz", bullet: "Bullet", daily: "Daily" };
 
@@ -37,7 +38,7 @@ async function route() {
   const seq = ++renderSeq;
   renderTabs(TAB_OF[r.page] || r.page);
   setStatus("");
-  if (!state.user) {
+  if (!state.user && r.page !== "guide") {
     $("view").innerHTML = `<div class="empty"><h2>Whose games?</h2><p>Type a Chess.com account in the box at the top right.</p></div>`;
     return;
   }

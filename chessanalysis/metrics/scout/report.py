@@ -159,6 +159,9 @@ def _ending(g):
     return "other"
 
 
+SHORT_GAME = 25       # moves: a loss inside this is an early collapse
+
+
 @metric("scout", title="How their games end", order=30)
 def endings(ctx):
     if not ctx.games:
@@ -174,12 +177,12 @@ def endings(ctx):
         c = Counter(_ending(g) for g in gs)
         rows.append({"label": f"{label} ({len(gs)})",
                      "segments": [{"name": k, "value": c.get(k, 0)} for k in pal if c.get(k)]})
-    short = [g for g in ctx.games if g.outcome == "loss" and len(g.moves) < 50]
+    short = [g for g in ctx.games if g.outcome == "loss" and len(g.moves) < 2 * SHORT_GAME]
     out = [W.barstack(rows, pal)]
     losses = sum(1 for g in ctx.games if g.outcome == "loss")
     if losses:
-        out.append(W.text(f"{len(short)} of their {losses} losses were over inside 25 "
-                          f"moves — a measure of how often they collapse early."))
+        out.append(W.text(f"{len(short)} of their {losses} losses were over in under "
+                          f"{SHORT_GAME} moves."))
     return out
 
 
@@ -211,7 +214,7 @@ def clock(ctx):
         W.card(f"{100 * tt / n:.0f}%", "Games in time trouble",
                sub=sub or f"clock under {int(TIME_TROUBLE_FRAC * 100)}%"),
         W.card(f"{100 * sum(end) / len(end):.0f}%", "Clock left at the end",
-               sub=(f"band: {100 * sum(band[2]) / len(band[2]):.0f}%"
+               sub=(f"players at their rating: {100 * sum(band[2]) / len(band[2]):.0f}%"
                     if band and band[2] else None)),
         W.card(f"{won_time} / {lost_time}", "Won / lost on time"),
     ]
@@ -275,5 +278,6 @@ def head_to_head(ctx):
                         "note": g.termination}]}
             for g in reversed(h2h)]
     return [W.cards([W.card(_rec(rec), "Your record against them",
-                            sub=f"{_score(rec)} in {rec.total} games")]),
+                            sub=f"a {_score(rec)} score in {rec.total} "
+                                f"game{'s' if rec.total != 1 else ''}")]),
             W.drilltable(["Date", "You had", "Result", "Opening"], rows)]

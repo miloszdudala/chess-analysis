@@ -295,7 +295,8 @@ def summary(user: str) -> dict:
             "new_left_today": max(0, NEW_PER_DAY - new_today),
             "learned": sum(k["learned"] for k in by_kind.values()),
             "by_kind": by_kind, "by_phase": phases, "kinds": KINDS,
-            "streak": _streak(user)}
+            "streak": _streak(user),
+            "rules": {"min_loss": MIN_LOSS, "gift": GIFT, "tolerance": TOLERANCE}}
 
 
 def _new_seen_today(user):

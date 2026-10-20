@@ -1,4 +1,4 @@
-// Peers: the rating corpus — you against your band, or the whole ladder.
+// Peers: the rating corpus — you against players at your rating, or every rating.
 
 import { esc, getJSON, postJSON, replaceHash, setStatus, spinner, state, who } from "../api.js";
 import { renderDoc } from "../widgets.js";
@@ -7,16 +7,17 @@ export async function render(view, route) {
   let scope = route.query.get("scope") === "ladder" ? "ladder" : "peers";
   let windowSize = +(route.query.get("window") || 70);
   view.innerHTML =
-    `<div class="page-head"><div class="grow"><h1>Peers</h1><p class="sub-title">Other players' 10-minute ` +
-    `games, analysed by the same engine at the same depth as yours — so every comparison here is on equal ` +
-    `terms. <b>My band</b> sets you against players at your rating; <b>Every band</b> shows what changes ` +
-    `as rating rises.</p></div>` +
-    `<div class="seg" id="pr-scope"><button data-s="peers">My band</button><button data-s="ladder">Every band</button></div></div>` +
-    `<div class="controls"><div class="field" id="pr-win-f"><label>Rating window</label><select id="pr-win">` +
-    [50, 70, 100, 150].map((w) => `<option value="${w}"${w === windowSize ? " selected" : ""}>± ${w}</option>`).join("") +
+    `<div class="page-head"><div class="grow"><h1>Peers</h1><p class="sub-title">Other players' ` +
+    `${esc((state.cfg && state.cfg.corpus && state.cfg.corpus.label) || "")} games, analysed by the same engine at ` +
+    `the same depth as yours, so every comparison here is on equal terms. <b>At my rating</b> sets you against ` +
+    `players rated close to you; <b>Every rating</b> shows what changes as rating rises. ` +
+    `<a class="guide-link" href="#/guide?s=peers">How this is measured →</a></p></div>` +
+    `<div class="seg" id="pr-scope"><button data-s="peers">At my rating</button><button data-s="ladder">Every rating</button></div></div>` +
+    `<div class="controls"><div class="field" id="pr-win-f"><label>Players within</label><select id="pr-win">` +
+    [50, 70, 100, 150].map((w) => `<option value="${w}"${w === windowSize ? " selected" : ""}>± ${w} of your rating</option>`).join("") +
     `</select></div><div class="field"><label>Expand by</label><select id="pr-n">` +
     [50, 100, 250, 500].map((n) => `<option value="${n}"${n === 100 ? " selected" : ""}>${n} games</option>`).join("") +
-    `</select></div><button class="btn" id="pr-expand" title="Fetch more games and analyse them, thinnest bands first">⊕ Expand the corpus</button>` +
+    `</select></div><button class="btn" id="pr-expand" title="Download more players' games and analyse them, thinnest rating ranges first">⊕ Expand the corpus</button>` +
     `<span class="mut" id="pr-size" style="font-size:.84rem;align-self:center"></span></div><div id="pr-doc"></div>`;
   const $q = (s) => view.querySelector(s);
 
@@ -24,8 +25,8 @@ export async function render(view, route) {
     try {
       const d = await getJSON("/api/corpus");
       const thin = (d.coverage || []).slice().sort((a, b) => a.samples - b.samples)[0];
-      $q("#pr-size").textContent = `${d.games} games · ${d.players} players · ${d.samples} samples at depth ${d.depth}` +
-        (thin ? ` · thinnest band ${thin.band}s (${thin.samples})` : "");
+      $q("#pr-size").textContent = `${d.games} games · ${d.players} players · ${d.samples} game sides at depth ${d.depth}` +
+        (thin ? ` · thinnest range ${thin.band}–${thin.band + d.band_size - 1} (${thin.samples})` : "");
       if (d.job && d.job.running) poll();
     } catch (e) { /* an empty corpus is not an error */ }
   }
@@ -57,7 +58,7 @@ export async function render(view, route) {
     $q("#pr-win-f").style.display = scope === "peers" ? "" : "none";
     replaceHash(`#/peers?scope=${scope}${scope === "peers" ? "&window=" + windowSize : ""}`);
     const host = $q("#pr-doc");
-    host.innerHTML = spinner(scope === "peers" ? "Comparing you with your band…" : "Building the ladder…");
+    host.innerHTML = spinner(scope === "peers" ? "Comparing you with players at your rating…" : "Comparing every rating range…");
     try {
       const doc = await getJSON(`/api/brackets?${who({ scope, window: windowSize })}`);
       renderDoc(host, doc);

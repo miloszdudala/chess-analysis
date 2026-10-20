@@ -181,3 +181,10 @@ def test_a_game_from_another_account_is_a_clean_400(client):
     store_game("tester", "rival", 2000, 2000, GAME_SANS, source="own")
     r = client.get("/api/game?user=tester&selector=185466884256")
     assert r.status_code == 400 and "185466884256" in r.get_json()["error"]
+
+
+def test_guide_endpoint(client):
+    d = client.get("/api/guide").get_json()
+    assert d["mode"] == "guide"
+    assert len(d["meta"]["ids"]) == len(d["sections"])
+    assert "win-chance" in d["meta"]["ids"]

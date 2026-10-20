@@ -235,7 +235,7 @@ def _decisive(game, a, outcome, loser, evals, moves, cp, on_time):
                       if m.ply > peak_i and m.wp_loss >= MISTAKE_WP]
         big = max(after_peak, key=lambda m: m.wp_loss) if after_peak else None
         if won:
-            turn = (f" It turned at {_mv(big)} (−{big.wp_loss:.0f}% win for them)."
+            turn = (f" It turned at {_mv(big)}, which cost them {big.wp_loss:.0f}% win chance."
                     if big else
                     (" It slipped away from them gradually rather than in one move."
                      if runs else ""))
@@ -243,7 +243,7 @@ def _decisive(game, a, outcome, loser, evals, moves, cp, on_time):
                       f"around move {(peak_i + 1) // 2} — and turned it around."
                       f"{turn}")
         else:
-            downfall = (f" It unravelled at {_mv(big)} (−{big.wp_loss:.0f}% win)."
+            downfall = (f" It unravelled at {_mv(big)}, which cost {big.wp_loss:.0f}% win chance."
                         if big else
                         (" It slipped away gradually rather than in one move."
                          if runs else ""))
@@ -257,11 +257,11 @@ def _decisive(game, a, outcome, loser, evals, moves, cp, on_time):
         pct = int(TIME_TROUBLE_FRAC * 100)
         if won:
             detail = (f"Your opponent cracked on the clock: their costliest "
-                      f"slip, {_mv(worst)} (−{worst.wp_loss:.0f}% win), came "
+                      f"move, {_mv(worst)} (−{worst.wp_loss:.0f}% win chance), came "
                       f"with under {pct}% of their time left.")
         else:
-            detail = (f"Your costliest slip, {_mv(worst)} "
-                      f"(−{worst.wp_loss:.0f}% win), came with under {pct}% of "
+            detail = (f"Your costliest move, {_mv(worst)} "
+                      f"(−{worst.wp_loss:.0f}% win chance), came with under {pct}% of "
                       f"your clock left — time pressure did the damage.")
         return result("time", detail)
 
@@ -270,12 +270,12 @@ def _decisive(game, a, outcome, loser, evals, moves, cp, on_time):
         before, after = evals[worst.ply - 1], evals[worst.ply]
         if won:
             detail = (f"Your opponent handed it over: {_mv(worst)} threw away "
-                      f"{worst.wp_loss:.0f}% win probability, swinging the game "
+                      f"{worst.wp_loss:.0f}% win chance, swinging the game "
                       f"from {_pawns(-before)} to {_pawns(-after)} in your "
                       f"favour, and you took it.")
         else:
             detail = (f"One move decided it: {_mv(worst)} threw away "
-                      f"{worst.wp_loss:.0f}% win probability, swinging the game "
+                      f"{worst.wp_loss:.0f}% win chance, swinging the game "
                       f"from {_pawns(before)} to {_pawns(after)}. The rest of "
                       f"your play was sound.")
         return result("blunder", detail)
@@ -299,12 +299,12 @@ def _decisive(game, a, outcome, loser, evals, moves, cp, on_time):
         span = f"{_mv(worst_run[0])}–{_mv(worst_run[-1])}"
         if won:
             detail = (f"A slow squeeze rather than one blunder: your opponent "
-                      f"leaked {lost}cp over {len(worst_run)} moves ({span}) "
-                      f"with no single obvious mistake.")
+                      f"gave away {lost / 100:.1f} pawns over {len(worst_run)} moves "
+                      f"({span}) with no single obvious mistake.")
         else:
-            detail = (f"A slow bleed rather than one blunder: {span} leaked "
-                      f"{lost}cp over {len(worst_run)} moves with no obvious "
-                      f"mistake.")
+            detail = (f"A slow bleed rather than one blunder: {span} gave away "
+                      f"{lost / 100:.1f} pawns over {len(worst_run)} moves with no "
+                      f"obvious mistake.")
         return result("drift", detail)
 
     # 7) No real error from the loser — the winner was simply better.
@@ -313,14 +313,14 @@ def _decisive(game, a, outcome, loser, evals, moves, cp, on_time):
     if won:
         cmp = (f" ({w_acc:.0f}% to {l_acc:.0f}% accuracy)"
                if w_acc is not None and l_acc is not None else "")
-        detail = (f"Your opponent made no major error (their worst move just "
-                  f"−{worst.wp_loss:.0f}% win); you simply played more "
+        detail = (f"Your opponent made no major error (their worst move cost "
+                  f"{worst.wp_loss:.0f}% win chance); you simply played more "
                   f"accurately{cmp} and ground them down.")
     else:
         cmp = (f" ({w_acc:.0f}% to your {l_acc:.0f}% accuracy)"
                if w_acc is not None and l_acc is not None else "")
-        detail = (f"You made no major error (worst move just "
-                  f"−{worst.wp_loss:.0f}% win); your opponent simply played "
+        detail = (f"You made no major error (your worst move cost "
+                  f"{worst.wp_loss:.0f}% win chance); your opponent simply played "
                   f"more accurately{cmp} and ground you down.")
     return result("outplayed", detail)
 

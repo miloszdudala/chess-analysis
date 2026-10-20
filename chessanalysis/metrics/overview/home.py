@@ -3,7 +3,9 @@ import time
 
 from ... import coach as C
 from ... import form as F
+from ... import glossary as G
 from ... import widgets as W
+from ...enrich.engine import win_prob
 from ...registry import metric
 
 # where each coach bucket sends you to work on it
@@ -56,10 +58,11 @@ def glance(ctx):
     pl = (ctx.coach or {}).get("plays_like")
     if pl:
         rec = (ctx.recent or {}).get("plays_like")
-        sub = f"range {_place(pl['low'])}–{_place(pl['high'])}"
+        sub = f"95% range {_place(pl['low'])}–{_place(pl['high'])}"
         if rec:
-            sub = f"last {ctx.recent['games']}: ≈{_place(rec['point'])} · " + sub
-        cards.append(W.card(f"≈{_place(pl['point'])}", "Your moves play like", sub=sub))
+            sub += f" · last {ctx.recent['games']} games ≈{_place(rec['point'])}"
+        cards.append(W.card(f"≈{_place(pl['point'])}", "Rating your moves play like",
+                            sub=sub))
     t = ctx.training or {}
     if t.get("total"):
         today = t["due"] + min(t["new"], t["new_left_today"])
@@ -72,49 +75,72 @@ def glance(ctx):
     return W.cards(cards)
 
 
+def _range(lo, hi):
+    """The 95% range of a relative gap, in words: 'from 48% less to 197% more'."""
+    return f"from {G.more_or_less(lo)} to {G.more_or_less(hi)}"
+
+
 def _detail(r):
-    return (f"You lose {r['you']:.2f} win-chance points a move here; players at your "
-            f"rating {r['peers']:.2f} ({100 * r['gap']:+.0f}%). Your opponents, in "
-            f"the same games, against players at their rating: "
-            f"{100 * r['control']:+.0f}%. Moves a game here: you {r['freq_you']:.1f}, "
-            f"peers {r['freq_peers']:.1f}.")
+    return (f"Your moves here give away {r['you']:.1f}% win chance on average; players "
+            f"at your rating {r['peers']:.1f}% — yours is {G.more_or_less(r['gap'])} than "
+            f"theirs. Your opponents, in the same games, against players at their rating: "
+            f"{G.more_or_less(r['control'])}. So the part put down to you is "
+            f"{G.more_or_less(r['net'])}. Measured on {r['moves']} of your moves "
+            f"({r['freq_you']:.1f} a game; players at your rating {r['freq_peers']:.1f}). "
+            f"95% range: {_range(r['lo'], r['hi'])}.")
 
 
 def _rows(result):
     return [{"key": r["key"], "label": r["label"], "group": r["group"], "help": r["help"],
              "gap": r["net"], "lo": r["lo"], "hi": r["hi"], "verdict": r["verdict"],
-             "detail": _detail(r), "raw": r["gap"], "control": r["control"]}
+             "moves": r["moves"], "detail": _detail(r), "raw": r["gap"],
+             "control": r["control"]}
             for r in result["rows"]]
 
 
 @metric("overview", title="You against players at your rating", order=20)
 def comparison(ctx):
+    from ... import corpus
+
     res = ctx.coach
+    tc = G.time_control_label(corpus.TIME_CONTROL)
     if not res:
-        msg = ("The peer comparison needs your games analysed at the corpus depth "
-               f"({ctx.pending} still to go — they are being analysed in the "
-               f"background) and a filled corpus (Peers → Expand database).")
+        msg = ("The comparison needs your games analysed at the depth the other "
+               f"players' games were ({ctx.pending} still to go — they are being "
+               f"analysed in the background) and enough of their games (Peers → "
+               f"Expand the corpus).")
         if ctx.time_class and ctx.time_class != "rapid":
-            msg = ("The rating corpus holds 10-minute games, so the peer comparison "
-                   "covers rapid only.")
+            msg = (f"The other players' games are {tc} games, so this comparison "
+                   f"covers rapid only.")
         return W.text(msg)
     lo, hi = res["elo_range"]
     variants = [{"label": f"All {res['games']} games", "rows": _rows(res)}]
     if ctx.recent:
         variants.append({"label": f"Last {ctx.recent['games']}", "rows": _rows(ctx.recent)})
     chart = W.gapchart(variants[0]["rows"], note=(
-        "Bars: how much more (right) or less (left) win chance you lose per move "
-        "than players at your rating, with your opponents' same figure taken out "
-        "as a control. Whiskers: 95% interval."))
+        "Each bar: how much more (right — worse) or less (left — better) win chance "
+        "your moves give away than players at your rating, after the correction for "
+        "your opponents. The thin line is the 95% range: a row is called a strength "
+        "or a weakness only when the whole range sits on one side of the centre. "
+        "\"Unclear\" means the moves measured so far cannot tell which side it is "
+        "on, however large the bar; \"too few moves\" means the range is more than "
+        "100 points wide."))
     chart["variants"] = variants
-    intro = (f"Every one of your {res['games']} games ({lo}–{hi}) is set against "
-             f"corpus players at the rating you had in that game — {res['peers']} "
-             f"game sides, same engine, depth {res['depth']}, same 10-minute "
-             f"control. The measure is the win chance each move gives away. Results "
-             f"are not compared: inside a band everyone scores about 50%.")
+    intro = (f"How much win chance your moves give away, against other players' {tc} "
+             f"games. Each of your {res['games']} games (rated {lo}–{hi}) is compared "
+             f"with players at the rating you had in that game: {res['peers']} game "
+             f"sides, analysed by the same engine at the same depth. Win chance is the "
+             f"evaluation as a percentage (0.00 is 50%, +1.00 about "
+             f"{win_prob(100):.0f}%); a move's cost is how far it lowers yours.")
+    pl = res.get("plays_like")
+    if pl and pl.get("point"):
+        intro += (f" \"Rating your moves play like\" (≈{_place(pl['point'])}) is the "
+                  f"rating at which players give away as much win chance per move as "
+                  f"you do, after the same correction.")
     if ctx.pending:
         intro += f" {ctx.pending} recent games are still being analysed."
-    return [W.text(intro), chart]
+    return [W.text(intro, guide="win-chance-lost", label="What win chance means"),
+            chart]
 
 
 @metric("overview", title="What to work on", order=25)
@@ -125,23 +151,30 @@ def focus(ctx):
         f = C.focus(res)
         for r in f["leaks"]:
             label, route = ROUTES.get(r["key"], ROUTES["total"])
-            items.append({"tone": "leak", "title": f"{r['label']}: {100 * r['net']:+.0f}%",
-                          "body": f"{r['help']} You lose more here than players at your "
-                                  f"rating, beyond what noise explains "
-                                  f"({100 * r['lo']:+.0f}% to {100 * r['hi']:+.0f}%).",
+            items.append({"tone": "leak",
+                          "title": f"{r['label']}: {G.more_or_less(r['net'])} win chance lost",
+                          "body": f"{r['help']} Your moves here give away "
+                                  f"{G.more_or_less(r['net'])} win chance than players "
+                                  f"at your rating; the 95% range, "
+                                  f"{_range(r['lo'], r['hi'])}, rules out chance.",
                           "action": {"label": label, "route": route}})
         for r in f["strengths"]:
-            items.append({"tone": "strength", "title": f"{r['label']}: {100 * r['net']:+.0f}%",
-                          "body": f"{r['help']} A clear strength against players at your "
-                                  f"rating ({100 * r['lo']:+.0f}% to {100 * r['hi']:+.0f}%).",
+            items.append({"tone": "strength",
+                          "title": f"{r['label']}: {G.more_or_less(r['net'])} win chance lost",
+                          "body": f"{r['help']} A clear strength: the 95% range, "
+                                  f"{_range(r['lo'], r['hi'])}, stays below players "
+                                  f"at your rating.",
                           "action": None})
         if not f["leaks"]:
-            lean = ", ".join(f"{r['label'].lower()} ({100 * r['net']:+.0f}%)"
-                             for r in f["leaning"]) or "nothing in particular"
-            items.append({"tone": "lean", "title": "No leak clears the noise",
-                          "body": f"With {res['games']} games no area is clearly worse than "
-                                  f"your peers'. Leaning that way: {lean}. More games "
-                                  f"narrow the intervals.", "action": None})
+            lean = "; ".join(f"{r['label'].lower()} ({G.more_or_less(r['net'])}, "
+                             f"{r['moves']} moves)" for r in f["leaning"])
+            body = (f"Over {res['games']} games no area is clearly worse than for "
+                    f"players at your rating.")
+            if lean:
+                body += (f" Worse than them so far, but still within chance: {lean}. "
+                         f"More games will settle it either way.")
+            items.append({"tone": "lean", "title": "No clear weakness yet", "body": body,
+                          "action": None})
     t = ctx.training or {}
     if t.get("total"):
         kinds = t["by_kind"]

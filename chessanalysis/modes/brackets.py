@@ -89,21 +89,23 @@ def brackets(username: str = "", scope: str = "ladder", window: int = 70,
         ctx.band = my_elo // corpus.BAND_SIZE * corpus.BAND_SIZE
         ctx.cohort = corpus.cohort(ctx.lo, ctx.hi, depth)
         if not ctx.cohort:
-            raise SystemExit(f"The corpus holds no games at {ctx.lo}-{ctx.hi} yet "
-                             "— use Expand database.")
+            raise SystemExit(f"There are no other players' games rated {ctx.lo}–{ctx.hi} "
+                             "yet — use Expand the corpus.")
         ctx.percentile = corpus.player_percentile(ctx.me["acc"], ctx.lo,
                                                   ctx.hi, depth)
-        title = f"{username} vs peers"
-        sub = (f"{my_elo} ± {window} · {int(ctx.cohort['n'])} peer games vs "
-               f"{int(ctx.me['n'])} of yours · depth {depth}")
+        ctx.who = f"players rated {ctx.lo}–{ctx.hi}"
+        title = f"{username} against players at your rating"
+        sub = (f"Your {int(ctx.me['n'])} games against {int(ctx.cohort['n'])} game "
+               f"sides of {ctx.who} (your rating {my_elo} ± {window}) · same engine, "
+               f"depth {depth}")
     else:
         ctx.bands = corpus.ladder(depth)
         if not ctx.bands:
-            raise SystemExit("The corpus is empty — use Expand database to fill it.")
+            raise SystemExit("No other players' games yet — use Expand the corpus.")
         ctx.me = corpus.mine(username, depth) if username else None
-        title = "Rating brackets"
-        sub = (f"{t['games']} games from {t['players']} players · "
-               f"{t['samples']} samples · depth {depth}")
+        title = "What changes as rating rises"
+        sub = (f"{t['games']} games from {t['players']} players, each side counted "
+               f"({t['samples']} game sides) · engine depth {depth}")
 
     doc = Document(mode="brackets", title=title, subtitle=sub,
                    meta={"scope": scope, "depth": depth, **t})

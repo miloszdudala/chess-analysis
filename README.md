@@ -65,10 +65,12 @@ accuracy per phase, where you left book — and its key moments, each a jump to
 that move. ← → step through the game; F flips the board.
 
 **Openings** — an explorer over three sources at once: your games (your score
-after each move, the engine's verdict, and what your own move costs on
-average), players rated near you, and 280,000 games between 2500+ and 2300+
-players. Positions are keyed so transpositions meet. Play on the board or click
-a move; moves you keep making that cost 5% or more are highlighted.
+after each move, the engine's verdict, and the win chance your own move gives
+away on average), other players rated near you (how often they play each move,
+and their score with it), and strong players (the Lichess Elite Database).
+Positions are keyed so transpositions meet. Play on the board or click a move;
+moves you keep making that cost an inaccuracy's worth of win chance or more are
+highlighted.
 
 **Train** — positions from your own games, until they stick. Three kinds: your
 mistakes (a move that cost 12% or more of your win chance), missed chances (your
@@ -85,15 +87,18 @@ whether you were converting or defending.
 form over time, the clock, why your games end the way they do, your progress
 against your own baseline, and the opponent-paired phase comparison.
 
-**Peers** — the rating corpus, at two scopes. *My band* sets you against the
-players at your rating; *every band* shows what changes as rating rises. On
-the corpus, middlegame blunders per 100 moves fall from 4.4 at 1800 to 2.6 at
-2200, against 1.0 → 0.4 in the opening and 2.7 → 2.1 in the endgame, and games
-are decided later — around move 15 at 1800, 19 at 2100 — with the share
-settled in the opening falling from 31% to 19%. The opening section measures
-openings in win chance rather than results, and *what the opening is worth*
-compares each player with themselves. **⊕ Expand the corpus** downloads and
-analyses more games, filling the thinnest band first.
+**Peers** — the rating corpus, at two scopes. *At my rating* sets you against
+the players rated close to you; *every rating* shows what changes as rating
+rises: accuracy and blunders by phase, how early games are decided, what the
+opening costs. The opening section measures openings in win chance rather than
+results, and *does knowing more theory pay?* compares each player with
+themselves. **⊕ Expand the corpus** downloads and analyses more games, filling
+the thinnest rating range first.
+
+**Guide** — what every number means: evaluation, win chance, what a move costs,
+accuracy, score and expected score, the 95% range, the correction for your
+opponents. Every example in it is computed from the formulas the statistics
+use, and the pages link to the definition they rely on.
 
 **Scout** — name an opponent: their recent games are downloaded and read for
 preparation, without the engine, so it takes seconds. What they open with as
@@ -102,33 +107,50 @@ openings by name, how their games end, how they use the clock against players
 at their rating, and your games against them. Their repertoire opens in the
 explorer.
 
+## The units
+
+One vocabulary on every page (`chessanalysis/glossary.py`, shown on the Guide):
+
+- **Evaluation** — the engine's verdict in pawns, from your side.
+- **Win chance** — the evaluation as a percentage, by Lichess's formula: 0.00 is
+  50%, +1.00 about 59%, a forced mate 100%.
+- **Win chance lost** — what one move gave away: how far it lowered your win
+  chance. Inaccuracy, mistake and blunder are 5%, 10% and 20% or more, as on
+  Lichess. Never called "points": to a chess player a point is a pawn.
+- **Score** — wins plus half the draws; **expected score** — what the Elo formula
+  predicts from two ratings.
+- **95% range** — where the true figure lies given how many moves it rests on.
+  A comparison whose range includes zero is reported as *unclear*, whichever
+  way it leans.
+
 ## How the comparison is made
 
 The coach measures one thing: the win chance each of your moves gives away,
 per move — the quantity Lichess accuracy is built from. It is split three ways
-(phase, situation, clock), plus your replies to an opponent's mistake.
+(phase, situation, clock), plus your replies to an opponent's mistake. Every
+row shows how many of your moves it rests on.
 
 - **Same terms.** Your games and the corpus are analysed by the same engine at
-  the same depth, in the same 10-minute time control.
+  the same depth, in the same time control (10-minute: `corpus.TIME_CONTROL`).
 - **Rating-matched.** Each of your games is set against corpus players at the
   rating you had *in that game*: a player who climbed 400 points would
-  otherwise have their early games judged against their current band.
+  otherwise have their early games judged against their current level.
 - **A control.** Your opponents in the same games are measured the same way,
   against players at their rating. Anything both sides of your games share and
   the corpus does not — the pool you play in, game length, the kind of position —
   moves the control, and the verdict is drawn on your gap with the control taken
-  out. Without it, a "time trouble leak" of +60% appears that your opponents
-  share in full (+71%).
-- **Intervals.** A paired bootstrap over your games. A bucket is a leak or a
-  strength only when its 95% interval clears zero; otherwise the page says
-  which way it leans and that more games will tell.
-- **Results are not compared.** Inside a band everyone scores about 50%, so
-  being better at one thing means being worse at another; points lost are
-  measured directly, where that compensation cannot hide.
+  out. Without it, a "time trouble weakness" can appear that your opponents, in
+  the same games, show just as much.
+- **Intervals.** A paired bootstrap over your games. A row is a weakness or a
+  strength only when its 95% range clears zero; otherwise it is *unclear*, and
+  the page shows the range so you can see how far it could go either way.
+- **Results are not compared.** Against players at your own rating everyone
+  scores about 50%, so being better at one thing means being worse at another;
+  win chance lost is measured directly, where that compensation cannot hide.
 
-*Your moves play like* reads your control-adjusted loss per move off the
-corpus ladder (which falls steadily, 3.7 at 1700 to 2.8 at 2200) and says so
-when you are beyond the bands the corpus covers, rather than extrapolating.
+*Rating your moves play like* reads your control-adjusted loss per move off the
+corpus's rating ladder (loss per move at each rating) and says so when you are
+beyond the ratings the corpus covers, rather than extrapolating.
 
 ## Phases
 
@@ -136,9 +158,9 @@ Opening, middlegame and endgame follow Lichess's Divider
 (`chessanalysis/phases.py`), not the move number: the middlegame starts with
 development, a thinned back rank or interlocked armies; the endgame when six or
 fewer pieces besides kings and pawns remain. A move belongs to the phase of the
-position it was played from. Every statistic uses this one definition. On the
-corpus the middlegame starts at a median of move 11 and the endgame at move 26;
-31% of games never reach one.
+position it was played from. Every statistic uses this one definition, except
+the opening tables, which measure a fixed stretch (moves 1–12) so every game is
+measured over the same number of moves.
 
 ## Where the data lives
 
@@ -187,6 +209,7 @@ chessanalysis/
 ├── enrich/engine.py       Stockfish per-move evals, Lichess accuracy
 ├── livengine.py           one long-lived engine for interactive questions
 ├── jobs.py                background jobs with pollable progress
+├── glossary.py            the units, in words, and the Guide built from them
 ├── coach.py               win chance lost, against rating-matched peers
 ├── training.py            positions to solve, judging, spaced repetition
 ├── explorer.py            the opening explorer's position indexes

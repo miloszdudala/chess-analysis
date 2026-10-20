@@ -43,24 +43,28 @@ def coach(user, last=None):
             return "?"
         return str(p.get("elo") or (f"{p['above']}+" if "above" in p else f"<{p['below']}"))
 
-    print(f"\n  {user} — {res['games']} games ({lo}–{hi}) against corpus players at the "
-          f"rating you had in each\n  {res['peers']} game sides · depth {res['depth']} · "
-          f"{res['time_control']}s games\n")
+    from chessanalysis import glossary as G
+
+    print(f"\n  {user} — {res['games']} games ({lo}–{hi}) against other players at the "
+          f"rating you had in each\n  {res['peers']} game sides · engine depth {res['depth']} · "
+          f"{G.time_control_label(res['time_control'])} games\n")
     if pl:
-        print(f"  Your moves play like ≈{place(pl['point'])} "
-              f"(95%: {place(pl['low'])}–{place(pl['high'])})\n")
-    print(f"  {'':28}{'you':>7}{'peers':>8}{'gap':>7}{'control':>9}{'net':>7}   interval")
+        print(f"  Rating your moves play like ≈{place(pl['point'])} "
+              f"(95% range {place(pl['low'])}–{place(pl['high'])})\n")
+    print(f"  {'':28}{'you':>7}{'them':>8}{'gap':>7}{'opp.':>9}{'net':>7}   95% range")
     group = None
     for r in res["rows"]:
         if r["group"] != group:
             group = r["group"]
             print(f"  {group.upper()}")
-        mark = {"leak": "▲ leak", "strength": "▼ strength"}.get(r["verdict"], "")
+        mark = {"leak": "▲ weakness", "strength": "▼ strength"}.get(r["verdict"], "unclear")
         print(f"    {r['label']:26}{r['you']:7.2f}{r['peers']:8.2f}{100 * r['gap']:+6.0f}%"
               f"{100 * r['control']:+8.0f}%{100 * r['net']:+6.0f}%   "
               f"[{100 * r['lo']:+.0f}%, {100 * r['hi']:+.0f}%]  {mark}")
-    print("\n  Win-chance points lost per move; net = your gap with your opponents' "
-          "(the control) taken out.\n")
+    print("\n  you / them: win chance lost per move, in %, for you and for players at your "
+          "rating.\n  gap: how much more (+) or less (−) you lose; opp.: the same for your "
+          "opponents in these games;\n  net: your gap with theirs taken out — the figure the "
+          "verdict is drawn on. See the app's Guide.\n")
 
 
 def train(user):

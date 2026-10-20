@@ -170,8 +170,13 @@ def reasons(label: str, groups: list[dict]) -> dict:
     return {"type": "reasons", "label": label, "groups": groups}
 
 
-def text(body: str) -> dict:
-    return {"type": "text", "body": body}
+def text(body: str, guide: str | None = None, label: str | None = None) -> dict:
+    """A paragraph. `guide` names a section of the Guide page (`glossary`)
+    to link to, for the unit the paragraph relies on."""
+    w = {"type": "text", "body": body}
+    if guide:
+        w["link"] = {"route": f"#/guide?s={guide}", "label": label or "How to read this"}
+    return w
 
 
 def actions(items: list[dict]) -> dict:

@@ -57,6 +57,7 @@ class CohortContext:
     lo: int = 0                     # peers: the rating window compared against
     hi: int = 0
     band: int | None = None         # peers: the band you sit in
+    who: str = "players at your rating"   # peers: the window, in words
     me: dict | None = None          # your aggregate, same engine + depth
     cohort: dict | None = None      # the cohort's aggregate
     bands: list = field(default_factory=list)      # brackets: the ladder

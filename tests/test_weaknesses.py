@@ -37,7 +37,7 @@ def test_phase_parity_pairs_you_against_opponents():
     out = wk.phase_parity([(WGame(), analysis(moves)) for _ in range(5)])
     rows = out[0]["widgets"][1]["rows"]
     assert rows[0][0] == "Opening"
-    assert rows[0][1] == "90.0%" and rows[0][2] == "80.0%" and rows[0][3] == "+10.0%"
+    assert rows[0][1] == "90.0%" and rows[0][2] == "80.0%" and rows[0][3] == "+10.0"
 
 
 def test_phase_parity_needs_sample():
@@ -93,7 +93,19 @@ def test_opening_leak_needs_repetition():
     tbl = out[0]["widgets"][1]
     assert tbl["type"] == "drilltable"
     row = tbl["rows"][0]
-    assert row["cells"][0] == "2. Ke2" and row["cells"][1] == "after 2…e5"
+    # White's second move answers Black's first: the position is "after 1…e5"
+    assert row["cells"][0] == "2. Ke2" and row["cells"][1] == "after 1…e5"
     assert row["cells"][2] == 3 and row["cells"][4] == "Nf3" and row["cells"][5] == "0-0-3"
     # drill-down opens each game at the position *before* the leak move (ply 2)
     assert len(row["games"]) == 3 and all(gm["ply"] == 2 for gm in row["games"])
+
+
+def test_book_moves_are_never_opening_leaks():
+    """2.Nf3 after 1.e4 e5 is what strong players play; however a shallow
+    search scores it, recurring is not a habit to fix."""
+    fen = "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2"
+    gm = [Move(ply=1, color="white", san="e4", clock=None),
+          Move(ply=2, color="black", san="e5", clock=None),
+          Move(ply=3, color="white", san="Nf3", clock=None)]
+    m = mev(3, "white", "inaccuracy", cpl=60, san="Nf3", best="Nc3", fen=fen, uci="g1f3")
+    assert wk.opening_leaks([(WGame("loss", moves=gm), analysis([m])) for _ in range(4)]) == []

@@ -1,7 +1,7 @@
 // Openings: an explorer over your games, players at your rating, and the
 // elite book — on a board you can play moves on.
 
-import { esc, evalText, getJSON, replaceHash, spinner, who } from "../api.js";
+import { esc, evalText, getJSON, replaceHash, spinner, state, who } from "../api.js";
 import { Board } from "../board.js";
 
 export async function render(view, route) {
@@ -29,11 +29,14 @@ function scoreBar(w, d, l) {
 export function mountExplorer(view, opts) {
   let color = opts.color, moves = opts.moves.slice(), pos = null, seq = 0, engineArrow = null;
   const who_ = opts.db ? esc(opts.db) : "You";
+  const book = (state.cfg && state.cfg.book) || {};
+  const costly = ((state.cfg && state.cfg.thresholds) || {}).inaccuracy ?? 5;
   view.innerHTML =
     `<div class="page-head"><div class="grow"><h1>${esc(opts.title)}</h1>` +
-    `<p class="sub-title">${opts.db ? `${esc(opts.db)}'s games` : "Your games"}, players rated near ` +
-    `${opts.db ? "them" : "you"} (the corpus), and 280,000 games between 2500+ and 2300+ players. ` +
-    `Transpositions meet: a position is one node however it was reached.</p></div>` +
+    `<p class="sub-title">Three sources side by side: ${opts.db ? `${esc(opts.db)}'s games` : "your games"}; ` +
+    `other players rated near ${opts.db ? "them" : "you"}; and strong players — ${esc(book.source || "an elite database")}` +
+    `${book.games ? `, ${book.games.toLocaleString()} games` : ""}. ` +
+    `A position is the same however it was reached, so transpositions meet.</p></div>` +
     `<div class="seg" id="ex-color"><button data-c="white">As White</button><button data-c="black">As Black</button></div></div>` +
     `<div class="ex"><div class="ex-left"><div class="ex-crumbs" id="ex-crumbs"></div><div id="ex-board"></div>` +
     `<div class="rv-nav"><button id="ex-start" title="Start">⏮</button><button id="ex-back" title="Back (←)">◀</button>` +
@@ -119,17 +122,18 @@ export function mountExplorer(view, opts) {
     $q("#ex-name").innerHTML = d.opening.name
       ? `<span class="eco">${esc(d.opening.eco)}</span>${esc(d.opening.name)}` : (moves.length ? "Unnamed line" : "Starting position");
     const yourMove = d.your_move;
+    const peers = d.band ? `players rated ${d.band.range[0]}–${d.band.range[1]}` : "";
     $q("#ex-turn").textContent = `${d.turn === "white" ? "White" : "Black"} to move — ` +
       (yourMove ? `${opts.db ? "their" : "your"} choice` : `${opts.db ? "their opponent's" : "your opponent's"} choice`) +
       ` · ${myTotal} of ${opts.db ? "their" : "your"} games reached this position` +
-      (d.band ? ` · ${d.band.games} band games` : "");
+      (d.band ? ` · so did ${d.band.games} games of ${peers}` : "");
     const bandTotal = d.band ? d.band.moves.reduce((s, m) => s + m.n, 0) : 0;
     const body = rows.map((r) => {
       const me = r.me, band = r.band, ms = r.masters;
-      const costly = yourMove && me && me.loss != null && me.loss >= 5 && me.n >= 2;
+      const isCostly = yourMove && me && me.loss != null && me.loss >= costly && me.n >= 2;
       const bandScore = band ? (yourMove ? band.score : 1 - band.score) : null;
-      return `<tr data-uci="${esc(r.uci)}" class="${costly ? "costly" : ""}">` +
-        `<td class="mv">${esc(r.san)}${ms ? `<span class="book" title="played in ${Math.round(100 * ms.share)}% of elite games here">book</span>` : ""}</td>` +
+      return `<tr data-uci="${esc(r.uci)}" class="${isCostly ? "costly" : ""}">` +
+        `<td class="mv">${esc(r.san)}${ms ? `<span class="book" title="a book move: strong players chose it in ${Math.round(100 * ms.share)}% of their games here">book</span>` : ""}</td>` +
         `<td class="n">${me ? me.n : `<span class="z">0</span>`}</td>` +
         `<td>${me ? `${pctTxt(me.score)}${scoreBar(me.w, me.d, me.l)}` : ""}</td>` +
         `<td class="loss">${yourMove && me && me.loss != null ? `−${me.loss.toFixed(1)}%` : ""}</td>` +
@@ -139,13 +143,20 @@ export function mountExplorer(view, opts) {
         `<td class="n">${ms ? `${Math.round(100 * ms.share)}%` : `<span class="z">—</span>`}</td></tr>`;
     }).join("");
     $q("#ex-table").innerHTML = rows.length
-      ? `<div class="tablewrap"><table class="ex-moves"><thead><tr><th class="l">Move</th><th>${who_}</th>` +
-        `<th>${opts.db ? "Their" : "Your"} score</th><th title="average win chance this move gave away (your moves only)">Cost</th>` +
-        `<th title="engine eval after the move, averaged over the analysed games (White's view)">Eval</th>` +
-        `<th>Band</th><th title="score of the side whose move it is, from ${opts.db ? "their" : "your"} side">Band score</th>` +
-        `<th>Masters</th></tr></thead><tbody>${body}</tbody></table></div>` +
+      ? `<div class="tablewrap"><table class="ex-moves"><thead>` +
+        `<tr><th class="l" rowspan="2">Move</th><th colspan="4" class="grp">${opts.db ? esc(opts.db) : "Your games"}</th>` +
+        `<th colspan="2" class="grp">${d.band ? `Players rated ${d.band.range[0]}–${d.band.range[1]}` : "Players at your rating"}</th>` +
+        `<th rowspan="2" title="share of strong players' games in this position that chose the move">Strong players</th></tr>` +
+        `<tr><th title="games in this position where the move was played">Games</th>` +
+        `<th title="wins plus half the draws, after this move">Score</th>` +
+        `<th title="average win chance the move gave away (${opts.db ? "their" : "your"} own moves only)">Win chance lost</th>` +
+        `<th title="average engine evaluation after the move, in pawns, from White's side">Eval</th>` +
+        `<th title="share of their games in this position that chose the move">Played</th>` +
+        `<th title="their score with this move — wins plus half the draws — seen from ${opts.db ? "this player's" : "your"} side of the board">Score</th>` +
+        `</tr></thead><tbody>${body}</tbody></table></div>` +
         `<p class="chart-hint" style="text-align:left">Highlighted: a move ${opts.db ? "they make" : "you make"} more than once that ` +
-        `costs 5% or more of the win chance on average. Click a row or play on the board.</p>`
+        `gives away ${costly}% win chance or more on average. Scores over a handful of games are mostly luck. ` +
+        `Click a row or play on the board. <a class="guide-link" href="#/guide?s=win-chance">What win chance means →</a></p>`
       : `<div class="empty">Nobody in any of the three sources reached this position.</div>`;
     $q("#ex-table").querySelectorAll("tbody tr").forEach((tr) => { tr.onclick = () => go([...moves, tr.dataset.uci], false); });
     const games = d.games || [];
@@ -182,8 +193,8 @@ export function mountExplorer(view, opts) {
       const rows = await getJSON(`/api/repertoire?${who(params)}`);
       host.innerHTML = rows.length
         ? `<div class="tablewrap"><table><thead><tr><th>Opening</th><th>Games</th><th>Score</th>` +
-          `<th title="average own moves inside the elite book">Book moves</th>` +
-          `<th title="share of games where this side left the book first">Left book first</th><th>Usual line</th></tr></thead><tbody>` +
+          `<th title="average number of ${opts.db ? "their" : "your"} own moves that were book moves">Book moves</th>` +
+          `<th title="share of games where ${opts.db ? "they" : "you"} left the book before the opponent did">Left the book first</th><th>Usual line</th></tr></thead><tbody>` +
           rows.map((r) => `<tr><td>${esc(r.name)}</td><td>${r.games}</td><td>${pctTxt(r.score)}</td>` +
             `<td>${r.book.toFixed(1)}</td><td>${pctTxt(r.left_first)}</td><td>${esc(r.line)}</td></tr>`).join("") +
           `</tbody></table></div><p class="chart-hint" style="text-align:left">Scores here describe; ` +

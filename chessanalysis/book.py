@@ -3,7 +3,7 @@
 **The book** is what strong players actually play. It is built from the Lichess
 Elite Database (database.nikonoel.fr, CC0 like the Lichess database it is cut
 from): every game between a 2500+ and a 2300+ player in one month, blitz and
-up — about 280,000 games. A move counts as *book* in a position when at least
+up (`facts()` counts them). A move counts as *book* in a position when at least
 `MIN_GAMES` of those games played it there and it is at least `MIN_SHARE` of
 what was played. Positions are compared by Zobrist key, not by move order, so
 transpositions count. The finished book is small enough to ship with the code
@@ -96,6 +96,24 @@ def _book() -> dict:
             key, uci, n = line.split("\t")
             book[int(key, 16)][uci] = int(n)
     return book
+
+
+SOURCE = "the Lichess Elite Database of games between 2500+ and 2300+ players"
+
+
+@lru_cache(maxsize=1)
+def facts() -> dict:
+    """What the book is, read off the book itself: every game has a first
+    move, so the moves counted at the starting position are its games (those
+    whose first move made the cut, which is all but a handful)."""
+    root = _book().get(chess.polyglot.zobrist_hash(chess.Board()), {})
+    return {"games": sum(root.values()), "source": SOURCE,
+            "min_games": MIN_GAMES, "min_share": f"{100 * MIN_SHARE:g}%"}
+
+
+def is_book(board: chess.Board, uci: str) -> bool:
+    """Whether strong players play `uci` in this position (see the module)."""
+    return uci in _book().get(chess.polyglot.zobrist_hash(board), {})
 
 
 _WALKS: dict = {}

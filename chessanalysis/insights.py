@@ -13,6 +13,7 @@ from collections import Counter
 from . import diagnosis as dx
 from . import overrides
 from . import widgets as W
+from .enrich.engine import MISTAKE
 from .phases import ORDER as PHASE_ORDER
 
 
@@ -96,10 +97,10 @@ def conversion_report(pairs, cp: int = 200) -> list[dict]:
                 f"{round(100 * b['t3'] / b['n'])}%",
                 round(100 * b["mi"] / b["n"], 1), round(100 * b["bl"] / b["n"], 1),
             ])
-        return W.table([label_col, "Moves", "Avg accuracy", "Top-3 match",
-                        "Mistakes/100", "Blunders/100"], rows)
+        return W.table([label_col, "Moves", "Accuracy", "Engine's top 3",
+                        "Mistakes per 100", "Blunders per 100"], rows)
 
-    thr = f"{cp / 100:.0f}"
+    thr = f"{cp / 100:.2f}"
     moves_n = sum(b["n"] for b in phase_agg.values())
     moves_t3 = sum(b["t3"] for b in phase_agg.values())
     # headline accuracy = mean of the per-game (Lichess-style) accuracies, not a
@@ -108,15 +109,16 @@ def conversion_report(pairs, cp: int = 200) -> list[dict]:
                  if a.accuracy.get(g.color) is not None]
     cards = W.cards([
         W.card(f"{sum(game_accs) / len(game_accs):.1f}%" if game_accs else "—",
-               "Your accuracy", sub="Lichess method (win%-based)"),
+               "Your accuracy", sub="average per game, Lichess's method"),
         W.card(f"{round(100 * moves_t3 / moves_n)}%" if moves_n else "—",
-               "Top-3 match", sub="your moves in the engine's top 3"),
+               "Moves in the engine's top 3", sub=f"of {moves_n} moves"),
         W.card(f"{round(100 * won / reached_win)}%" if reached_win else "—",
-               "Conversion", sub=f"{won}/{reached_win} winning games won"),
+               "Winning positions won", sub=f"{won} of {reached_win} games you reached +{thr}"),
         W.card(f"{round(100 * saved / reached_loss)}%" if reached_loss else "—",
-               "Save rate", sub=f"{saved}/{reached_loss} losing games saved"),
+               "Losing positions saved",
+               sub=f"{saved} of {reached_loss} games you reached −{thr} (won or drawn)"),
         W.card(f"{round(100 * decisive / len(pairs))}%" if pairs else "—",
-               "Decisive games", sub=f"reached ±{thr}"),
+               "Games where someone got winning", sub=f"the evaluation reached ±{thr}"),
     ])
 
     def top_phase(counter):
@@ -131,10 +133,13 @@ def conversion_report(pairs, cp: int = 200) -> list[dict]:
         W.card(won_top[0], "Wins decided in", sub=won_top[1]),
         W.card(lost_top[0], "Losses decided in", sub=lost_top[1]),
         W.card(f"move {round(sum(won_moves) / len(won_moves))}" if won_moves else "—",
-               "Avg move you win"),
+               "Wins decided, on average"),
         W.card(f"move {round(sum(lost_moves) / len(lost_moves))}" if lost_moves else "—",
-               "Avg move you lose"),
+               "Losses decided, on average"),
     ])
+    decided_note = W.text(
+        f"Where a game was decided: the move after which the winner stayed at least "
+        f"{lead / 100:.2f} ahead for the rest of the game.")
     decided_table = W.table(
         ["Phase", "Wins decided here", "Losses decided here"],
         [[ph, won_phase.get(ph, 0), lost_phase.get(ph, 0)] for ph in PHASE_ORDER],
@@ -145,9 +150,13 @@ def conversion_report(pairs, cp: int = 200) -> list[dict]:
     # version instead. phase_agg still feeds the Top-3 headline card above.)
     return [
         {"title": "Outcomes", "widgets": [cards]},
-        {"title": "Where games are decided", "widgets": [decided_cards, decided_table]},
-        {"title": "Accuracy by position (your move)",
-         "widgets": [table(state_agg, [s[0] for s in STATES], "Position")]},
+        {"title": "Where games are decided", "widgets": [decided_note, decided_cards,
+                                                          decided_table]},
+        {"title": "Accuracy by the position you moved in",
+         "widgets": [W.text("Your moves grouped by the evaluation before them. Blunders "
+                            "are rare in losing positions for an arithmetic reason: "
+                            "with little win chance left, there is little left to lose."),
+                     table(state_agg, [s[0] for s in STATES], "Position")]},
     ]
 
 
@@ -273,7 +282,6 @@ def accuracy_trend(pairs) -> list[dict]:
 
 
 # --- advanced, engine-derived diagnostics -----------------------------------
-OPP_DROP = 150        # cp the opponent must hand you in one move to count as a chance
 ERROR_LABELS = {"mistake", "blunder"}
 
 
@@ -281,42 +289,42 @@ def _is_error(label) -> bool:
     return label in ERROR_LABELS
 
 
-def advanced_report(pairs) -> list[dict]:
-    """Tactical awareness & tilt, aggregated over all analysed games.
+def punish_chances(game, analysis):
+    """[(their move, your reply)] for every opponent mistake or blunder (a move
+    that cost them at least `MISTAKE` win chance) that you got to answer.
 
-    Two engine-derived diagnostics with a clear chess meaning: do you punish
-    opponent blunders with the refutation, and does one error of yours breed
-    the next? (Weaker signals — sharpness ACPL, premature simplification —
-    were dropped as hard to act on.)
+    The one definition of "a chance to punish" — the Stats page, the progress
+    check and the Peers comparison all count it this way; "punished" means the
+    reply was the engine's first choice.
     """
-    opp_chances = opp_taken = 0                       # opponent-error capitalization
-    err_followed = err_then_err = 0                   # cascading errors
+    moves = analysis.moves
+    return [(m, moves[i + 1]) for i, m in enumerate(moves[:-1])
+            if m.color != game.color and m.wp_loss >= MISTAKE
+            and moves[i + 1].color == game.color]
+
+
+def punished(reply) -> bool:
+    return bool(reply.best_san) and reply.san == reply.best_san
+
+
+def advanced_report(pairs) -> list[dict]:
+    """Punishing mistakes, and whether one error breeds the next.
+
+    Two engine-derived diagnostics with a clear chess meaning: do you answer
+    an opponent's mistake with the engine's move, and how often does a
+    mistake of yours come straight after another one?
+    """
+    opp_chances = opp_taken = 0
+    err_followed = err_then_err = 0
     base_moves = base_err = 0
 
     for g, a in pairs:
-        evals = a.evals
-        if not evals:
+        if not a.evals:
             continue
-        sgn = 1 if g.color == "white" else -1
-        moves = a.moves
-
-        # Opponent error capitalization: opponent hands you ≥OPP_DROP in one move,
-        # do you reply with the engine's #1 (the refutation)?
-        for i, m in enumerate(moves):
-            if m.color == g.color:
-                continue
-            p = m.ply
-            if not (1 <= p < len(evals)):
-                continue
-            if sgn * evals[p] - sgn * evals[p - 1] >= OPP_DROP:
-                opp_chances += 1
-                nxt = moves[i + 1] if i + 1 < len(moves) else None
-                if nxt and nxt.color == g.color and nxt.best_san and nxt.san == nxt.best_san:
-                    opp_taken += 1
-
-        # Cascading error probability: P(error | previous move was an error),
-        # over your own consecutive moves.
-        mine = [m for m in moves if m.color == g.color]
+        for _, reply in punish_chances(g, a):
+            opp_chances += 1
+            opp_taken += punished(reply)
+        mine = [m for m in a.moves if m.color == g.color]
         for j, m in enumerate(mine):
             base_moves += 1
             base_err += _is_error(m.label)
@@ -328,31 +336,30 @@ def advanced_report(pairs) -> list[dict]:
         return []
 
     pct = lambda n, d: f"{round(100 * n / d)}%" if d else "—"
-    casc = pct(err_then_err, err_followed)
-    base_rate = pct(base_err, base_moves)
-
     cards = W.cards([
-        W.card(pct(opp_taken, opp_chances), "Opponent-error capitalization",
-               sub=f"{opp_taken}/{opp_chances} refuted with the top move"),
-        W.card(casc, "Cascading-error probability",
-               sub=f"P(error | prior error) · base {base_rate}"),
+        W.card(pct(opp_taken, opp_chances), "Their mistakes you punished",
+               sub=f"{opp_taken} of {opp_chances} answered with the engine's move"),
+        W.card(pct(err_then_err, err_followed), "A mistake straight after a mistake",
+               sub=f"{err_then_err} of {err_followed} times · on any move "
+                   f"{pct(base_err, base_moves)}"),
     ])
     notes = W.text(
-        "Opponent-error capitalization — when the opponent blunders ≥1.5 pawns, how "
-        "often you find the engine's refutation (offensive sharpness). "
-        "Cascading-error probability — chance your next move is also an error right "
-        "after a mistake; well above your base error rate signals tilt.")
-    return [{"title": "Tactical awareness & tilt", "widgets": [cards, notes]}]
+        f"Their mistakes you punished: when your opponent's move cost them "
+        f"{MISTAKE:.0f}% win chance or more, how often your reply was the engine's "
+        f"first choice. A mistake straight after a mistake: after a move of yours "
+        f"that was a mistake or a blunder, how often the next one was too — far "
+        f"above your rate on any move suggests one error unsettles you.")
+    return [{"title": "Punishing mistakes, and mistakes in a row", "widgets": [cards, notes]}]
 
 
 # --- progress check: recent games vs your own baseline ----------------------
 # metric key -> (label, higher_is_better, "no change" epsilon, sample floor key)
 _PROGRESS_METRICS = [
     ("acc", "Accuracy", True, 0.5),
-    ("bl100", "Blunders / 100 moves", False, 0.3),
-    ("conv", "Conversion of winning positions", True, 3.0),
-    ("punish", "Opponent blunders punished", True, 3.0),
-    ("open_cpl", "Opening cp-loss per move", False, 3.0),
+    ("bl100", "Blunders per 100 moves", False, 0.3),
+    ("conv", "Winning positions won", True, 3.0),
+    ("punish", "Their mistakes you punished", True, 3.0),
+    ("open_loss", "Opening: win chance lost per move", False, 0.3),
     ("tt", "Games reaching time trouble", False, 3.0),
 ]
 
@@ -365,7 +372,7 @@ def _progress_block(pairs, cp):
     """
     from .clocks import TIME_TROUBLE_FRAC, clock_profile
 
-    accs, open_cpl = [], []
+    accs, open_loss = [], []
     own = bl = reached = won = chances = taken = prof = tt = 0
     for g, a in pairs:
         if not a.evals or not a.moves:
@@ -378,18 +385,15 @@ def _progress_block(pairs, cp):
         if max(user_evals) >= cp:
             reached += 1
             won += (g.outcome == "win")
-        for i, m in enumerate(a.moves):
+        for m in a.moves:
             if m.color == g.color:
                 own += 1
                 bl += (m.label == "blunder")
                 if a.phase_of(m.ply) == "Opening":
-                    open_cpl.append(m.cp_loss)
-            elif 1 <= m.ply < len(a.evals) and \
-                    sgn * a.evals[m.ply] - sgn * a.evals[m.ply - 1] >= OPP_DROP:
-                chances += 1
-                nxt = a.moves[i + 1] if i + 1 < len(a.moves) else None
-                if nxt and nxt.color == g.color and nxt.best_san and nxt.san == nxt.best_san:
-                    taken += 1
+                    open_loss.append(m.wp_loss)
+        for _, reply in punish_chances(g, a):
+            chances += 1
+            taken += punished(reply)
         try:
             pp = clock_profile(g, g.color)
         except Exception:                   # noqa: BLE001 — clockless stubs/games
@@ -407,8 +411,8 @@ def _progress_block(pairs, cp):
         out["conv"] = (100 * won / reached, reached)
     if chances >= 5:
         out["punish"] = (100 * taken / chances, chances)
-    if len(open_cpl) >= 100:
-        out["open_cpl"] = (sum(open_cpl) / len(open_cpl), len(open_cpl))
+    if len(open_loss) >= 100:
+        out["open_loss"] = (sum(open_loss) / len(open_loss), len(open_loss))
     if prof >= 10:
         out["tt"] = (100 * tt / prof, prof)
     return out
@@ -430,7 +434,7 @@ def progress_report(pairs, cp: int = 200) -> list[dict]:
     recent = _progress_block(usable[cut:], cp)
 
     unit = {"acc": "%", "conv": "%", "punish": "%", "tt": "%",
-            "bl100": "", "open_cpl": "cp"}
+            "bl100": "", "open_loss": "%"}
     rows, better = [], 0
     tracked = 0
     for key, label, higher, eps in _PROGRESS_METRICS:
@@ -440,7 +444,7 @@ def progress_report(pairs, cp: int = 200) -> list[dict]:
         delta = r - b
         u = unit[key]
         if abs(delta) < eps:
-            change = "≈ no real change"
+            change = "about the same"
         else:
             good = (delta > 0) == higher
             arrow = "▲" if delta > 0 else "▼"
@@ -452,14 +456,13 @@ def progress_report(pairs, cp: int = 200) -> list[dict]:
         return []
 
     head = W.cards([
-        W.card(f"{better}/{tracked}", "Areas improving",
-               sub=f"last {len(usable) - cut} games vs the {cut} before"),
+        W.card(f"{better}/{tracked}", "Measures that got better",
+               sub=f"last {len(usable) - cut} games against the {cut} before"),
     ])
     note = W.text(
-        f"Your last {len(usable) - cut} analysed games against your own earlier "
-        f"baseline ({cut} games) — the honest way to see whether the things "
-        f"you're working on are moving. Small recent samples are noisy: treat "
-        f"a change as real only when it persists as more games come in.")
+        f"Your last {len(usable) - cut} analysed games against your {cut} games "
+        f"before them. These are small samples, and no row here has a 95% range: "
+        f"treat a change as real only when it lasts as more games come in.")
     return [{"title": "Progress check — recent vs baseline", "widgets": [
         head, note,
         W.table(["Metric", "Baseline", "Recent", "Change"], rows),
@@ -475,14 +478,16 @@ def outcome_reasons(pairs, cp: int = 200) -> list[dict]:
     """
     # outcome -> reason key -> list of per-game entries (for the drill-down)
     buckets = {"win": {}, "loss": {}, "draw": {}}
-    factors = Counter()
     totals = Counter()
-    n = 0
+    n = tt_errors = 0
     for g, a in pairs:
         dg = dx.diagnose(g, a, cp)
         if dg is None:
             continue
         n += 1
+        low_at, _ = dx._clock_ctx(g, g.color)
+        tt_errors += any(m.color == g.color and m.wp_loss >= MISTAKE and low_at(m.ply)
+                         for m in a.moves)
         # honour a manual correction of the reason flag, if the player set one
         primary, detail = dg.primary, dg.detail
         ov = overrides.get(getattr(g, "game_id", ""))
@@ -499,8 +504,6 @@ def outcome_reasons(pairs, cp: int = 200) -> list[dict]:
             "detail": detail,
             "acc": a.accuracy.get(getattr(g, "color", "")),
         })
-        for f in dg.factors:
-            factors[f] += 1
     if not n:
         return []
 
@@ -516,8 +519,10 @@ def outcome_reasons(pairs, cp: int = 200) -> list[dict]:
     cards = W.cards([
         top_card("loss", dx.LOSS_REASONS, "Top reason you lose"),
         top_card("win", dx.WIN_REASONS, "Top reason you win"),
-        W.card(f"{round(100 * factors['time'] / n)}%" if n else "—",
-               "Time pressure a factor", sub=f"in {factors['time']}/{n} games"),
+        W.card(f"{round(100 * tt_errors / n)}%" if n else "—",
+               "Games with a mistake in time trouble",
+               sub=f"{tt_errors} of {n}: a mistake or blunder with under "
+                   f"{int(100 * dx.TIME_TROUBLE_FRAC)}% of your clock left"),
     ])
 
     plural = {"win": "wins", "loss": "losses", "draw": "draws"}
@@ -544,11 +549,10 @@ def outcome_reasons(pairs, cp: int = 200) -> list[dict]:
         return out
 
     notes = W.text(
-        "Each game is reduced to one dominant reason for its result — a single "
+        "Each game is reduced to one main reason for its result — a single "
         "blunder, a slow positional drift, time pressure, an opponent's gift, a "
-        "thrown-away winning position, or simply being out-played. Time pressure "
-        "and drift are also tracked as secondary factors that compound the main "
-        "cause. Click any reason to see the games behind it.")
+        "winning position let slip, or simply being outplayed. Click any reason "
+        "to see the games behind it.")
     widgets = [cards, notes]
     for outcome, reasons, label in (("loss", dx.LOSS_REASONS, "Why you lose"),
                                     ("win", dx.WIN_REASONS, "Why you win"),

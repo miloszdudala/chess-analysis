@@ -13,10 +13,13 @@ export async function render(view, route) {
   let summary = await postJSON(`/api/train/sync?user=${u()}`);
   const session = { tried: 0, first: 0 };
 
+  const rules = summary.rules || {};
   view.innerHTML =
-    `<div class="page-head"><div class="grow"><h1>Train</h1><p class="sub-title">Positions from your own games ` +
-    `where the move played cost real win chance. Solve each one; it comes back on a spaced-repetition ` +
-    `schedule until it sticks. Any move within 5% of the engine's best counts as solved.</p></div></div>` +
+    `<div class="page-head"><div class="grow"><h1>Train</h1><p class="sub-title">Positions from your own games: ` +
+    `your moves that cost ${rules.min_loss ?? "?"}% win chance or more, and replies that gave back an opponent's ` +
+    `gift of ${rules.gift ?? "?"}% or more. Solve each one; it comes back on a spaced-repetition schedule until it ` +
+    `sticks. Any move within ${rules.tolerance ?? "?"}% win chance of the engine's best counts as solved. ` +
+    `<a class="guide-link" href="#/guide?s=win-chance">What win chance means →</a></p></div></div>` +
     `<div class="tr"><div><div id="tr-board"></div></div><div class="tr-panel">` +
     `<div class="chips" id="tr-kind"></div><div class="chips" id="tr-phase"></div>` +
     `<div class="tr-stats" id="tr-stats"></div>` +
@@ -177,7 +180,7 @@ export async function render(view, route) {
     } else {
       attempts += 1;
       board.flash(uci.slice(2, 4));
-      feedback("bad", `✗ ${esc(res.san)} gives away ${res.loss}% compared with the best move`,
+      feedback("bad", `✗ ${esc(res.san)} gives away ${res.loss}% win chance compared with the best move`,
         attempts >= 3 ? "Still not it — try once more, or show the solution." : "Try again.");
     }
   }

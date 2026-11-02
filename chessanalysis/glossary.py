@@ -125,6 +125,24 @@ def guide_sections(corpus_facts: dict | None = None, book_facts: dict | None = N
                "pawns."),
     ]))
 
+    from .metrics.game.control import SETTLED
+    out.append(("average-win-chance", "Average win chance — who had the better of a game", [
+        W.text("Shown on a game's review. The win chance of the position after every "
+               "move, both sides' moves, averaged over the game. Your opponent's is "
+               "100% minus yours; 50% means neither side had the better of it. A game spent a pawn down reads below 50% even if it ends in a "
+               "draw, and a game you were winning for long stretches reads above 50% "
+               "even if you lose it."),
+        W.text(f"Counting stops once the game is settled: at the first position from "
+               f"which one side's win chance stays at {SETTLED:.0f}% or more (about "
+               f"{pawns_for(SETTLED):.1f} pawns up) to the end. Moves after that are "
+               f"left out, so how long the winner took to finish, or when the loser "
+               f"resigned, does not change the figure."),
+        W.text("It is not accuracy. Accuracy grades each move against the best move in "
+               "its position, so a side can keep a high accuracy while defending a "
+               "worse position all game. The average win chance measures the positions "
+               "themselves."),
+    ]))
+
     out.append(("score", "Score, expected score and Elo", [
         W.text("Score is wins plus half the draws, as a share of the games: 6 wins, "
                "2 draws and 2 losses is a 70% score."),

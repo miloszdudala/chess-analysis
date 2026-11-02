@@ -5,6 +5,7 @@ from ... import config
 from ... import widgets as W
 from ...phases import ORDER as PHASES
 from ...registry import metric
+from .control import SETTLED, control
 
 
 def _acc(v):
@@ -80,6 +81,11 @@ def summary(ctx):
     d = a.decisive(cp)
     cards = [W.card(_acc(a.accuracy.get(s)), f"{s.title()} accuracy", sub=g.h(s.title()))
              for s in ("white", "black")]
+    c = control(a.evals, g.color)
+    if c and len(a.moves) == c["total"]:
+        span = ("over the whole game" if c["counted"] == c["total"] else
+                f"until {_move_label(a.moves[c['counted'] - 1])}, when it was settled")
+        cards.append(W.card(f"{c['avg']:.0f}%", "Your average win chance", sub=span))
     walk = book.walk(g) if getattr(g, "moves", None) else None
     if walk and walk.name:
         left = ("both stayed in book as far as it goes" if walk.left_by is None else
@@ -115,7 +121,11 @@ def summary(ctx):
             W.table(["Side", "Accuracy", "ACPL", "Top-3", "Opening", "Middlegame",
                      "Endgame", "Inacc.", "Mistakes", "Blunders"], rows),
             W.text(note + " Phase columns are the average accuracy of the moves played "
-                   "in that phase (and how many); ACPL is the average centipawn loss.",
+                   "in that phase (and how many); ACPL is the average centipawn loss. "
+                   "Average win chance is the win chance after every move, both "
+                   "sides', averaged until one side holds "
+                   f"{SETTLED:.0f}% or more to the end; 50% means neither side had "
+                   "the better of the game.",
                    guide="win-chance-lost", label="What accuracy and ACPL are")]
 
 

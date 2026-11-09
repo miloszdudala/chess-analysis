@@ -1,9 +1,7 @@
 # Chess Analysis
 
-Your Chess.com games, analysed by Stockfish and read three ways: **what is
-true** about your play compared with players at your rating, measured on equal
-terms; **what happened** in each game; and **what to practise**, drawn from
-the positions you actually got wrong.
+This is a personal chess analysis webpage, giving insights to explore much beyond what is shown for free accounts. 
+All code is AI-written while I state what I want to see and explain methods to derive the more complicated statistics.
 
 ## Setup
 

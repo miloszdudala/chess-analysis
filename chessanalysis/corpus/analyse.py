@@ -39,7 +39,8 @@ _N_COLS = SAMPLE_COLS.count(",") + 1
 
 # Bumped whenever the way a sample row is derived changes; `ensure_samples`
 # rebuilds every row from the stored analyses when it does.
-SAMPLES_VERSION = "divider-2"   # 2: centipawn loss on evals capped at ±1000
+# 2: centipawn loss on evals capped at ±1000; 3: endgames by material
+SAMPLES_VERSION = "divider-3"
 
 
 def analyse_pgn(pgn_text: str, engine, depth: int = DEPTH) -> dict | None:

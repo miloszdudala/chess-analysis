@@ -18,7 +18,10 @@ def overview(username: str, time_class: str | None = "rapid") -> Document:
         raise SystemExit(f"No games stored for '{username}' yet.")
     if time_class:
         games = [g for g in games if g.time_class == time_class]
-    ctx = OverviewContext(player=username, games=games, time_class=time_class)
+    record = [g for g in load_games(username, include_flagged=True)
+              if not time_class or g.time_class == time_class]
+    ctx = OverviewContext(player=username, games=games, time_class=time_class,
+                          record=record)
     corpus_analyse.ensure_samples(corpus.DEPTH)
     at_tc = [g for g in games if g.time_control == corpus.TIME_CONTROL]
     ctx.pending = sum(1 for g in at_tc if not store.has_analysis(g.game_id, corpus.DEPTH))

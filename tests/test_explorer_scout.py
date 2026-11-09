@@ -59,7 +59,7 @@ def test_scouting_reads_their_games_and_your_lines():
     store_game("rival", "me", 2050, 2000, ITALIAN, result="0-1", source="scout", date=today)
     doc = modes.get("scout")("rival", me="me", time_class="rapid", months=3)
     titles = [s.title for s in doc.sections]
-    assert "What they play" in titles and "How their games end" in titles
+    assert "First moves" in titles and "Endings" in titles
     assert "Head to head" in titles
     assert doc.meta["opponent"] == "rival"
 

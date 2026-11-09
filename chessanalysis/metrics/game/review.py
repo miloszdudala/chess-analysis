@@ -72,7 +72,7 @@ def _phase_acc(a, side):
     return out
 
 
-@metric("game", title="The game in numbers", order=10, needs=("engine",))
+@metric("game", title="Summary", order=10, needs=("engine",))
 def summary(ctx):
     from ... import book
 
@@ -83,8 +83,8 @@ def summary(ctx):
              for s in ("white", "black")]
     c = control(a.evals, g.color)
     if c and len(a.moves) == c["total"]:
-        span = ("over the whole game" if c["counted"] == c["total"] else
-                f"until {_move_label(a.moves[c['counted'] - 1])}, when it was settled")
+        span = ("all moves" if c["counted"] == c["total"] else
+                f"until {_move_label(a.moves[c['counted'] - 1])}")
         cards.append(W.card(f"{c['avg']:.0f}%", "Your average win chance", sub=span))
     walk = book.walk(g) if getattr(g, "moves", None) else None
     if walk and walk.name:
@@ -155,7 +155,7 @@ def _quality_counts(analysis, side):
     return counts
 
 
-@metric("game", title="Every move, classified", order=30, needs=("engine",))
+@metric("game", title="Move classification", order=30, needs=("engine",))
 def move_quality(ctx):
     a = ctx.analysis
     rows = [{"label": side.title(),

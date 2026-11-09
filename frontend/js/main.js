@@ -17,10 +17,11 @@ const PAGES = {
   stats: () => import("./pages/stats.js"),
   peers: () => import("./pages/peers.js"),
   scout: () => import("./pages/scout.js"),
+  extras: () => import("./pages/extras.js"),
   guide: () => import("./pages/guide.js"),
 };
 const TABS = [["overview", "Overview"], ["games", "Games"], ["openings", "Openings"],
-  ["train", "Train"], ["stats", "Stats"], ["peers", "Peers"], ["scout", "Scout"], ["guide", "Guide"]];
+  ["train", "Train"], ["stats", "Stats"], ["peers", "Peers"], ["scout", "Scout"], ["extras", "Extras"], ["guide", "Guide"]];
 const TAB_OF = { game: "games" };
 const FORMAT_LABELS = { rapid: "Rapid", blitz: "Blitz", bullet: "Bullet", daily: "Daily" };
 

@@ -56,7 +56,7 @@ def _rows(mine, theirs, label_of, order=None):
     return rows
 
 
-@metric("brackets", title="Why games are won and lost", order=45)
+@metric("brackets", title="Win and loss reasons", order=45)
 def reasons(ctx):
     """The same one-dominant-reason diagnosis the Player report runs, tallied
     for you and for your band so the two distributions sit side by side."""
@@ -91,7 +91,7 @@ def reasons(ctx):
     return widgets if len(widgets) > 1 else None
 
 
-@metric("brackets", title="Punishing their mistakes", order=58)
+@metric("brackets", title="Opponent mistakes punished", order=58)
 def capitalisation(ctx):
     """When the opponent makes a mistake, how often the engine's move is the
     reply — counted exactly as on the Stats page (`insights.punish_chances`)."""

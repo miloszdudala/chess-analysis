@@ -304,7 +304,7 @@ def load_games(user: str, include_flagged: bool = False) -> list[Game]:
     games.sort(key=lambda g: g.sort_key)
 
     cheated = fairplay.cheated_ids(games)
-    ratings.apply(games, cheated)
+    ratings.apply(games, cheated, fairplay.banned_since(games))
     if include_flagged:
         return games
     skip = overrides.flagged_ids() | cheated

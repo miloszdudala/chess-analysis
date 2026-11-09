@@ -78,3 +78,4 @@ class OverviewContext:
     recent: dict | None = None         # ...over the latest RECENT games
     training: dict | None = None       # training.summary
     pending: int = 0                   # your games not yet analysed for the coach
+    record: list[Game] | None = None   # every game in the format, flagged included

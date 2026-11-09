@@ -8,8 +8,8 @@ export async function render(view, route) {
   const id = route.parts[0];
   const ply = route.query.get("ply");
   view.innerHTML = spinner("Running Stockfish… a game not analysed yet takes about half a minute.");
-  const depth = state.cfg.depth;
-  const doc = await getJSON(`/api/game?user=${encodeURIComponent(state.user)}&selector=${encodeURIComponent(id || "last")}&depth=${depth}`);
+  // no depth: the server reviews each game at its own (bullet games shallower)
+  const doc = await getJSON(`/api/game?user=${encodeURIComponent(state.user)}&selector=${encodeURIComponent(id || "last")}`);
 
   // older / newer game, from the list the Games page uses
   let nav = "";

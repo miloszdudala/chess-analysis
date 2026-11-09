@@ -21,9 +21,12 @@ def offline(monkeypatch):
 
     def fake_fetch(username):
         calls.append(username)
-        return {"cheat": fairplay.BANNED, "ghost": None}.get(username, "basic")
+        if username == "ghost":
+            return None
+        status = fairplay.BANNED if username == "cheat" else "basic"
+        return {"status": status, "country": "PL"}
 
-    monkeypatch.setattr(fairplay, "_fetch_status", fake_fetch)
+    monkeypatch.setattr(fairplay, "_fetch_profile", fake_fetch)
     monkeypatch.setattr(time, "sleep", lambda s: None)
     return calls
 
@@ -46,10 +49,24 @@ def test_lookups_are_cached_so_a_resync_costs_nothing(offline):
 def test_a_clean_status_is_rechecked_once_it_goes_stale(offline):
     fairplay.refresh(["honest"])
     stale = time.time() - (fairplay.TTL_DAYS + 1) * 86400
-    store.kv_set("fairplay", "honest", {"status": "basic", "checked": stale})
+    store.kv_set("fairplay", "honest", {"status": "basic", "country": "PL", "checked": stale})
     offline.clear()
     fairplay.refresh(["honest"])
     assert offline == ["honest"]
+
+
+def test_the_country_is_kept_with_the_status(offline):
+    fairplay.refresh(["Honest"])
+    assert fairplay.country("honest") == "PL"
+
+
+def test_an_entry_cached_before_countries_is_looked_up_once_more(offline):
+    store.kv_set("fairplay", "honest", {"status": "basic", "checked": time.time()})
+    fairplay.refresh(["honest"])
+    assert offline == ["honest"]
+    offline.clear()
+    fairplay.refresh(["honest"])
+    assert offline == []
 
 
 def test_a_ban_is_permanent_and_never_rechecked(offline):
@@ -97,7 +114,7 @@ def test_a_recent_opponent_is_rechecked_long_before_the_normal_ttl(offline):
     fairplay.refresh([("honest", played)])
     # a day later the normal TTL has nowhere near expired...
     store.kv_set("fairplay", "honest",
-               {"status": "basic", "checked": time.time() - 86400})
+               {"status": "basic", "country": "PL", "checked": time.time() - 86400})
     offline.clear()
     fairplay.refresh(["honest"])                     # ...without recency: skipped
     assert offline == []
@@ -109,7 +126,7 @@ def test_an_old_opponent_keeps_the_cheap_ttl(offline):
     long_ago = time.time() - 200 * 86400
     fairplay.refresh([("honest", long_ago)])
     store.kv_set("fairplay", "honest",
-               {"status": "basic", "checked": time.time() - 2 * 86400})
+               {"status": "basic", "country": "PL", "checked": time.time() - 2 * 86400})
     offline.clear()
     fairplay.refresh([("honest", long_ago)])
     assert offline == []                             # settled: no request

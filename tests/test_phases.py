@@ -22,8 +22,26 @@ def test_development_starts_the_middlegame():
     assert not phases.is_endgame(DEVELOPED)
 
 
-def test_few_pieces_is_an_endgame():
+def test_little_material_is_an_endgame():
     assert phases.is_endgame(ENDING)
+
+
+def test_queen_rook_and_minor_piece_each_is_still_a_middlegame():
+    # six pieces, but each side has 17 points of them
+    assert not phases.is_endgame(chess.Board("3qr1k1/5ppp/2n5/8/8/2B5/5PPP/3QR1K1 w - - 0 30"))
+
+
+def test_the_endgame_limit_is_13_points_per_side():
+    # queen + bishop (12) and two rooks + bishop (13) on both sides
+    assert phases.is_endgame(chess.Board("3q2k1/5ppp/2n5/8/8/2B5/5PPP/3Q2K1 w - - 0 30"))
+    assert phases.is_endgame(chess.Board("3rr1k1/5ppp/2n5/8/8/2B5/5PPP/3RR1K1 w - - 0 30"))
+    # queen + rook (14) is over the limit
+    assert not phases.is_endgame(chess.Board("3qr1k1/5ppp/8/8/8/8/5PPP/3QR1K1 w - - 0 30"))
+
+
+def test_both_sides_must_be_within_the_limit():
+    # White's queen + two rooks against Black's lone rook
+    assert not phases.is_endgame(chess.Board("3r2k1/5ppp/8/8/8/8/5PPP/3QRR1K w - - 0 30"))
 
 
 def test_division_and_the_phase_of_a_move():

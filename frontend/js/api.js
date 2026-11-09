@@ -10,12 +10,17 @@ export const state = {
   format: "rapid",
 };
 
-const KEY_USER = "chess-analyzer:user";
-const KEY_FORMAT = "chess-analyzer:format";
-const KEY_THEME = "chess-analyzer:theme";
+const KEY_USER = "chess-analysis:user";
+const KEY_FORMAT = "chess-analysis:format";
+const KEY_THEME = "chess-analysis:theme";
 
 function load(key, fallback = "") {
-  try { return localStorage.getItem(key) ?? fallback; } catch (e) { return fallback; }
+  try {
+    // keys were "chess-analyzer:*" before the rename; read those as a fallback
+    return localStorage.getItem(key)
+      ?? localStorage.getItem(key.replace("chess-analysis:", "chess-analyzer:"))
+      ?? fallback;
+  } catch (e) { return fallback; }
 }
 function save(key, value) {
   try { localStorage.setItem(key, value); } catch (e) { /* private mode */ }

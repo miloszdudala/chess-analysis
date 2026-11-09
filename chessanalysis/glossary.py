@@ -205,11 +205,12 @@ def guide_sections(corpus_facts: dict | None = None, book_facts: dict | None = N
         "had moves to offer.")]))
 
     out.append(("phases", "Opening, middlegame, endgame", [W.text(
-        "Phases follow the position, not the move number (Lichess's definition). "
-        "The middlegame begins when ten or fewer minor and major pieces are left, "
-        "when either back rank is mostly empty (development), or when the armies "
-        "are interlocked; the endgame begins when six or fewer minor and major "
-        "pieces are left. A move belongs to the phase of the position it was "
+        "Phases follow the position, not the move number. The middlegame begins "
+        "when ten or fewer minor and major pieces are left, when either back rank "
+        "is mostly empty (development), or when the armies are interlocked "
+        "(Lichess's definition). The endgame begins when each side has at most 13 "
+        "points of pieces left, counting a knight or bishop as 3, a rook as 5 and "
+        "a queen as 9. A move belongs to the phase of the position it was "
         "played from. The opening tables measure moves 1–12 instead, a fixed "
         "stretch, so every game is measured over the same number of moves.")]))
     return out

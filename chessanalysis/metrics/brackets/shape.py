@@ -16,7 +16,7 @@ def _rows(ctx):
     return [(f"{b['band']}–{b['band'] + BAND_SIZE - 1}", b) for b in ctx.bands]
 
 
-@metric("brackets", title="White, draw, black", order=35)
+@metric("brackets", title="Results by color", order=35)
 def colour_split(ctx):
     """Counted once per game, unlike everything else here.
 
@@ -49,7 +49,7 @@ def colour_split(ctx):
                    f"half the draws).")]
 
 
-@metric("brackets", title="Where games are decided", order=60)
+@metric("brackets", title="Phase where games are decided", order=60)
 def where_decided(ctx):
     """The phase in which the eval first crossed ±2.00.
 
@@ -57,7 +57,7 @@ def where_decided(ctx):
     property of the game, not of who won — so it is meaningful at either scope.
     """
     if ctx.scope != "ladder":
-        return None       # at peers scope this lives as a line in "Where the gap is"
+        return None       # at peers scope this lives as a line in "Accuracy and blunders by phase"
     rows = []
     for label, d in _rows(ctx):
         if not d:

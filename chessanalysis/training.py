@@ -209,13 +209,14 @@ def _openings(pairs) -> list[dict]:
 
 def _analysed(user, min_depth=12):
     """(Game, GameAnalysis) for every counted game with a multi-candidate
-    analysis on record — the deepest one."""
+    analysis on record — the deepest one. Bullet games count from their own,
+    shallower review depth."""
     from .enrich import engine as eng
     from .model import load_games
 
     pairs = []
     for g in load_games(user):
-        depth = eng.deepest_cached(g, min_depth)
+        depth = eng.deepest_cached(g, min(min_depth, eng.review_depth(g)))
         raw = store.load_analysis(g.game_id, depth)
         if raw and raw.get("evals") and raw.get("top_moves"):
             pairs.append((g, eng._derive(raw, depth, raw.get("engine_name", "cache"))))

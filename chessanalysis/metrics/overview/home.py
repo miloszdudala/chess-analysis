@@ -36,17 +36,20 @@ def _place(p):
 
 def _days_ago(games, days):
     cutoff = time.strftime("%Y.%m.%d", time.gmtime(time.time() - days * 86400))
-    before = [g for g in games if g.sort_key < cutoff and g.user_elo]
-    return before[-1].user_elo if before else None
+    before = [g for g in games if g.sort_key < cutoff and g.user_elo_raw]
+    return before[-1].user_elo_raw if before else None
 
 
 @metric("overview", title=None, order=10)
 def glance(ctx):
     games = ctx.games
-    elos = [g.user_elo for g in games if g.user_elo]
+    # the Rating card is Chess.com's number, as the site shows it: every game,
+    # flagged ones too, and no cheat-refund correction
+    record = ctx.record or games
+    elos = [g.user_elo_raw for g in record if g.user_elo_raw]
     cards = []
     if elos:
-        then = _days_ago(games, 30)
+        then = _days_ago(record, 30)
         sub = (f"{elos[-1] - then:+d} in 30 days" if then else
                f"from {elos[0]} · peak {max(elos)}")
         cards.append(W.card(elos[-1], "Rating", sub=sub))
@@ -98,7 +101,7 @@ def _rows(result):
             for r in result["rows"]]
 
 
-@metric("overview", title="You against players at your rating", order=20)
+@metric("overview", title="Win chance lost vs players at your rating", order=20)
 def comparison(ctx):
     from ... import corpus
 
@@ -123,8 +126,8 @@ def comparison(ctx):
         "your opponents. The thin line is the 95% range: a row is called a strength "
         "or a weakness only when the whole range sits on one side of the centre. "
         "\"Unclear\" means the moves measured so far cannot tell which side it is "
-        "on, however large the bar; \"too few moves\" means the range is more than "
-        "100 points wide."))
+        "on, however large the bar; \"too few moves\" means the range spans more "
+        "than 100% (say, from 40% less to 70% more)."))
     chart["variants"] = variants
     intro = (f"How much win chance your moves give away, against other players' {tc} "
              f"games. Each of your {res['games']} games (rated {lo}–{hi}) is compared "
@@ -143,38 +146,27 @@ def comparison(ctx):
             chart]
 
 
-@metric("overview", title="What to work on", order=25)
+@metric("overview", title="Strengths and weaknesses", order=25)
 def focus(ctx):
     items = []
     res = ctx.coach
     if res:
         f = C.focus(res)
-        for r in f["leaks"]:
-            label, route = ROUTES.get(r["key"], ROUTES["total"])
-            items.append({"tone": "leak",
-                          "title": f"{r['label']}: {G.more_or_less(r['net'])} win chance lost",
-                          "body": f"{r['help']} Your moves here give away "
-                                  f"{G.more_or_less(r['net'])} win chance than players "
-                                  f"at your rating; the 95% range, "
-                                  f"{_range(r['lo'], r['hi'])}, rules out chance.",
-                          "action": {"label": label, "route": route}})
-        for r in f["strengths"]:
-            items.append({"tone": "strength",
-                          "title": f"{r['label']}: {G.more_or_less(r['net'])} win chance lost",
-                          "body": f"{r['help']} A clear strength: the 95% range, "
-                                  f"{_range(r['lo'], r['hi'])}, stays below players "
-                                  f"at your rating.",
-                          "action": None})
-        if not f["leaks"]:
-            lean = "; ".join(f"{r['label'].lower()} ({G.more_or_less(r['net'])}, "
-                             f"{r['moves']} moves)" for r in f["leaning"])
-            body = (f"Over {res['games']} games no area is clearly worse than for "
-                    f"players at your rating.")
-            if lean:
-                body += (f" Worse than them so far, but still within chance: {lean}. "
-                         f"More games will settle it either way.")
-            items.append({"tone": "lean", "title": "No clear weakness yet", "body": body,
-                          "action": None})
+        # every item states the same measured facts; the tone is the only
+        # judgement, and it is the 95% range's: wholly above, below, or across 0
+        for tone, rows in (("leak", f["leaks"]), ("strength", f["strengths"]),
+                           ("lean", [] if f["leaks"] else f["leaning"])):
+            side = {"leak": "lies wholly above", "strength": "lies wholly below",
+                    "lean": "includes"}[tone]
+            for r in rows:
+                label, route = ROUTES.get(r["key"], ROUTES["total"])
+                items.append({
+                    "tone": tone,
+                    "title": f"{r['label']}: {G.more_or_less(r['net'])} win chance lost",
+                    "body": f"{r['help']} Measured on {r['moves']} of your moves "
+                            f"against players at your rating. The 95% range, "
+                            f"{_range(r['lo'], r['hi'])}, {side} their figure.",
+                    "action": None if tone == "strength" else {"label": label, "route": route}})
     t = ctx.training or {}
     if t.get("total"):
         kinds = t["by_kind"]

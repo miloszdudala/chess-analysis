@@ -216,7 +216,7 @@ function buildGapChart(host, w) {
     for (const r of rows) {
       if (r.group !== group) { group = r.group; html += `<div class="gc-group">${esc(group)}</div>`; }
       const a = x(Math.min(0, r.gap)), b = x(Math.max(0, r.gap));
-      // a range over 100 points wide says nothing yet, whichever way the bar points
+      // a range spanning over 100% cannot tell the direction, whichever way the bar points
       const tag = r.verdict === "leak" ? "weakness" : r.verdict === "strength" ? "strength"
         : r.hi - r.lo > 1 ? "too few moves" : "unclear";
       const range = `95% range: ${words(r.lo)} to ${words(r.hi)}`;

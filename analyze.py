@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Chess Analyzer from the terminal.
+"""Chess Analysis from the terminal.
 
     python3 analyze.py                         # the coach: you against players at your rating
     python3 analyze.py coach [user] [--last 30]

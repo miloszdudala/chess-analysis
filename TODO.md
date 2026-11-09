@@ -2,7 +2,7 @@
 
 Things worth doing, with enough context to pick up cold.
 
-## Done in 2.0
+## Done
 
 - **Phases by position, in one place.** `phases.py` is Lichess's Divider and
   every statistic imports it; corpus samples record where each game's
@@ -12,9 +12,10 @@ Things worth doing, with enough context to pick up cold.
   the Divider, so that finding is about chess, not about move 32. What moved
   was the endgame (flat before, a mild decline now) and how early games are
   decided in the opening (38% → 23% before, 31% → 13% now: the Divider's
-  opening ends sooner for stronger players). The endgame threshold is Lichess's
-  (six or fewer minor and major pieces) — inherited, but from a published
-  definition that matches the accuracy formula's source.
+  opening ends sooner for stronger players). Those figures used Lichess's
+  endgame threshold (six or fewer minor and major pieces). It has since been
+  replaced by material, at most 13 points of pieces per side, because that
+  threshold counted queen, rook and minor piece each as an endgame.
 - **Compare became Scout.** Engine-free, so it is instant on any account; the
   "progress UI for analysing someone's whole history" problem went away with
   the engine. Head-to-head is shown as the record it is, without inference.

@@ -28,7 +28,7 @@ def _counts(values):
     return out
 
 
-@metric("brackets", title="Your games by accuracy", order=25)
+@metric("brackets", title="Accuracy distribution", order=25)
 def distribution(ctx):
     from ... import corpus
 

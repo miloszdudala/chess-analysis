@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Chess Analyzer — the web app.
+"""Chess Analysis — the web app.
 
     .venv/bin/python webapp.py        # then open http://127.0.0.1:5050
 
@@ -65,10 +65,6 @@ def _format():
     return fmt
 
 
-def _review_depth():
-    return int(config.get("ENGINE_DEPTH", "15"))
-
-
 # --- the frontend -------------------------------------------------------------
 
 @app.get("/")
@@ -96,7 +92,8 @@ def api_config():
     from chessanalysis.enrich import engine as eng
 
     return jsonify({"user": config.get("CHESS_USERNAME"), "modes": modes.names(),
-                    "depth": _review_depth(), "formats": list(FORMATS),
+                    "depth": int(config.get("ENGINE_DEPTH", "15")),
+                    "bullet_depth": int(config.get("BULLET_DEPTH", "10")), "formats": list(FORMATS),
                     "corpus": {"time_control": corpus.TIME_CONTROL, "depth": corpus.DEPTH,
                                "label": glossary.time_control_label(corpus.TIME_CONTROL)},
                     "book": book.facts(),
@@ -145,13 +142,14 @@ EST = {"corpus": 1.2, "review": 33.0}
 def _analysis_todo(user):
     from chessanalysis import corpus
 
-    depth = _review_depth()
+    from chessanalysis.enrich import engine as eng
+
     counted = [g for g in load_games(user)
                if g.time_control == corpus.TIME_CONTROL
                and not store.has_analysis(g.game_id, corpus.DEPTH)]
     review = []
     for g in load_games(user, include_flagged=True):
-        raw = store.load_analysis(g.game_id, depth)
+        raw = store.load_analysis(g.game_id, eng.deepest_cached(g, eng.review_depth(g)))
         if not (raw and raw.get("evals") and raw.get("top_moves")):
             review.append(g)
     return counted, list(reversed(review))           # newest reviews first
@@ -166,7 +164,7 @@ def _analysis_worker(job, user):
     counted, review = _analysis_todo(user)
     total = len(counted) + len(review)
     job.update(total=total, done=0, stage="peer comparison", corpus_todo=len(counted),
-               review_todo=len(review), depth=_review_depth(),
+               review_todo=len(review),
                eta=round(len(counted) * EST["corpus"] + len(review) * EST["review"]))
     spent = {"corpus": [0.0, 0], "review": [0.0, 0]}
 
@@ -197,7 +195,7 @@ def _analysis_worker(job, user):
             if proc is None:
                 proc = chess.engine.SimpleEngine.popen_uci(eng.find_engine())
             t = time.time()
-            eng.analyse_game(g, depth=_review_depth(), engine=proc)
+            eng.analyse_game(g, engine=proc)
             spent["review"][0] += time.time() - t
             spent["review"][1] += 1
             job.step()
@@ -256,7 +254,8 @@ def _analysed_pairs(user, fmt, n, depth):
     """(Game, GameAnalysis) for the chosen format, at least `depth` deep.
 
     `depth` is a floor, not a target: a game already analysed deeper is read
-    back at that depth rather than analysed again."""
+    back at that depth rather than analysed again. A bullet game's floor is
+    its own review depth when that is shallower."""
     import chess.engine
     from chessanalysis.enrich import engine as eng
 
@@ -268,7 +267,7 @@ def _analysed_pairs(user, fmt, n, depth):
     proc, pairs = None, []
     try:
         for g in games:
-            d = eng.deepest_cached(g, depth)
+            d = eng.deepest_cached(g, min(depth, eng.review_depth(g)))
             if not store.has_analysis(g.game_id, d) and proc is None:
                 proc = chess.engine.SimpleEngine.popen_uci(eng.find_engine())
             pairs.append((g, eng.analyse_game(g, depth=d, engine=proc)))
@@ -295,6 +294,16 @@ def api_insights():
                 + weaknesses.report(pairs)
                 + insights.advanced_report(pairs))
     return jsonify({"sections": sections})
+
+
+@app.get("/api/countries")
+@api
+def api_countries():
+    from chessanalysis import countries
+
+    fmt = _format()
+    games = [g for g in load_games(_user()) if not fmt or g.time_class == fmt]
+    return jsonify(countries.record(games))
 
 
 @app.get("/api/games")
@@ -548,5 +557,5 @@ def api_brackets():
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", "5050"))
-    print(f"\n  Chess Analyzer →  http://127.0.0.1:{port}\n")
+    print(f"\n  Chess Analysis →  http://127.0.0.1:{port}\n")
     app.run(host="127.0.0.1", port=port, debug=False, threaded=True)

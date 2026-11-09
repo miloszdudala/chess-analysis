@@ -35,7 +35,7 @@ from . import store
 from .clocks import parse_time_control
 from .enrich.engine import MISTAKE, win_prob
 
-LEDGER_VERSION = 1
+LEDGER_VERSION = 2        # 2: endgames by material (`phases.is_endgame`)
 CLAMP = 1000              # centipawns; a mate score stops being informative here
 AHEAD = 150               # eval before the move, mover's view: ahead / behind
 ERROR = MISTAKE           # an opponent move losing this much is a mistake to punish
@@ -46,7 +46,7 @@ BUCKETS = [
     ("total", "Overall", "Every move", "All your moves."),
     ("op", "Phase", "Opening", "Moves played before the middlegame began."),
     ("mg", "Phase", "Middlegame", "From the middlegame's start to the endgame's."),
-    ("eg", "Phase", "Endgame", "Six or fewer pieces left besides kings and pawns."),
+    ("eg", "Phase", "Endgame", "Each side has at most 13 points of pieces left."),
     ("ahead", "Situation", "When ahead",
      f"Moves played at +{AHEAD / 100:.1f} or better — converting an advantage."),
     ("level", "Situation", "When level",

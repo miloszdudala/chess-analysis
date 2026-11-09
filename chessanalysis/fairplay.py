@@ -18,6 +18,10 @@ last week is precisely the one whose status is about to flip — cache that for 
 week and the ban lands inside the blind spot. Opponents played in the last
 `RECENT_DAYS` are therefore re-checked every `RECENT_TTL_HOURS`; older ones
 keep the cheap `TTL_DAYS`. It costs one request per recent opponent per day.
+
+The same profile carries the account's country, so it is kept alongside the
+status for the World map (`countries`). An entry cached before that was kept
+is looked up once more to fill it in.
 """
 from __future__ import annotations
 
@@ -45,15 +49,19 @@ _RECENT_TTL = RECENT_TTL_HOURS * 3600
 _RECENT = RECENT_DAYS * 86400
 
 
-def _fetch_status(username: str) -> str | None:
-    """One profile lookup. None if the account is unreadable (404, network)."""
+def _fetch_profile(username: str) -> dict | None:
+    """One profile lookup: {"status", "country"}. None if the account is
+    unreadable (404, network). `country` is the ISO code at the end of the
+    profile's country URL ("https://api.chess.com/pub/country/PL" -> "PL")."""
     url = f"{API}/player/{urllib.parse.quote(username)}"
     req = urllib.request.Request(url, headers=HEADERS)
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
-            return json.load(resp).get("status")
+            profile = json.load(resp)
     except (urllib.error.URLError, OSError, json.JSONDecodeError):
         return None
+    country = (profile.get("country") or "").rstrip("/").rsplit("/", 1)[-1].upper()
+    return {"status": profile.get("status"), "country": country or None}
 
 
 def status(username: str) -> str | None:
@@ -62,16 +70,22 @@ def status(username: str) -> str | None:
     return (entry or {}).get("status")
 
 
+def country(username: str) -> str | None:
+    """Cached country code for one account, or None if unknown."""
+    entry = store.kv_get("fairplay", username.lower())
+    return (entry or {}).get("country")
+
+
 def is_banned(username: str) -> bool:
     return status(username) == BANNED
 
 
 def _stale(entry: dict | None, recent: bool = False) -> bool:
     """Does this cached status need another lookup? Bans never do."""
-    if not entry:
-        return True
-    if entry.get("status") == BANNED:
+    if entry and entry.get("status") == BANNED:
         return False                      # a ban is permanent
+    if not entry or "country" not in entry:
+        return True                       # never looked up, or cached before countries were
     ttl = _RECENT_TTL if recent else _TTL
     return time.time() - entry.get("checked", 0) > ttl
 
@@ -117,11 +131,11 @@ def refresh(opponents, log=None) -> dict:
         recent = bool(played[name]) and (now - played[name]) < _RECENT
         entry = store.kv_get("fairplay", name)
         if _stale(entry, recent):
-            st = _fetch_status(name)
+            profile = _fetch_profile(name)
             checked += 1
-            if st is not None:
-                store.kv_set("fairplay", name, {"status": st, "checked": time.time()})
-                if st == BANNED and log:
+            if profile is not None:
+                store.kv_set("fairplay", name, {**profile, "checked": time.time()})
+                if profile["status"] == BANNED and log:
                     log(f"  {name}: banned for fair-play violations")
             time.sleep(0.2)               # be polite to the API
     return {"checked": checked,
@@ -131,6 +145,18 @@ def refresh(opponents, log=None) -> dict:
 def cheated_ids(games) -> set[str]:
     """Ids of games played against an account since closed for cheating."""
     return {str(g.game_id) for g in games if g.opponent and is_banned(g.opponent)}
+
+
+def banned_since(games) -> dict[str, float]:
+    """{game_id: unix time the opponent's ban was first seen}, for cheated
+    games. A ban is never looked up again, so its `checked` stamp is that
+    moment — what `ratings` needs to tell a late refund from none at all."""
+    out = {}
+    for g in games:
+        entry = store.kv_get("fairplay", g.opponent.lower()) if g.opponent else None
+        if entry and entry.get("status") == BANNED:
+            out[str(g.game_id)] = entry.get("checked", 0)
+    return out
 
 
 def flags(games) -> dict[str, dict]:

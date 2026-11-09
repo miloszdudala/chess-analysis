@@ -343,10 +343,21 @@ def deepest_cached(game, minimum: int) -> int:
     return best
 
 
+def review_depth(game) -> int:
+    """The depth a game is reviewed at: `ENGINE_DEPTH`, or the shallower
+    `BULLET_DEPTH` for bullet — a 1-minute game's errors are coarse enough to
+    find at depth 10, at about a quarter of the engine time."""
+    if game.time_class == "bullet":
+        return int(config.get("BULLET_DEPTH", "10"))
+    return int(config.get("ENGINE_DEPTH", "15"))
+
+
 def analyse_game(game, depth: int | None = None, engine=None) -> GameAnalysis:
-    """Analyse one Game. Uses the disk cache; opens an engine if not given."""
+    """Analyse one Game. Uses the disk cache; opens an engine if not given.
+    Without a `depth`, the game's review depth — or a deeper analysis already
+    on record."""
     if depth is None:
-        depth = int(config.get("ENGINE_DEPTH", "15"))
+        depth = deepest_cached(game, review_depth(game))
 
     cached = store.load_analysis(game.game_id, depth)
     # An analysis without `top_moves` (an old cache entry, or a bulk corpus

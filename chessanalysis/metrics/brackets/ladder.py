@@ -10,7 +10,7 @@ def _label(band):
     return f"{band}–{band + BAND_SIZE - 1}"
 
 
-@metric("brackets", title="Every rating range, side by side", order=12)
+@metric("brackets", title="Rating ranges", order=12)
 def table(ctx):
     if ctx.scope != "ladder":
         return None
@@ -37,7 +37,7 @@ def table(ctx):
     ]
 
 
-@metric("brackets", title="Accuracy by phase, at each rating", order=20)
+@metric("brackets", title="Accuracy by phase and rating", order=20)
 def phase_curve(ctx):
     """Accuracy in each phase, against rating."""
     if ctx.scope != "ladder":
@@ -51,7 +51,7 @@ def phase_curve(ctx):
     return W.xyline(series, y_label="Accuracy", x_label="Rating (start of range)")
 
 
-@metric("brackets", title="Blunders by phase, at each rating", order=30)
+@metric("brackets", title="Blunders by phase and rating", order=30)
 def blunder_curve(ctx):
     if ctx.scope != "ladder":
         return None

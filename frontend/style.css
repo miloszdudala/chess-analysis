@@ -1,4 +1,4 @@
-/* Chess Analyzer — one stylesheet, light and dark.
+/* Chess Analysis — one stylesheet, light and dark.
    Colours are tokens on :root; dark mode redefines them. Components below
    only ever read tokens, so a new view gets both themes for free. */
 
@@ -55,8 +55,6 @@ header.app { position: sticky; top: 0; z-index: 20; background: color-mix(in srg
 .brand { font-weight: 650; letter-spacing: -.01em; display: flex; align-items: center; gap: .45rem;
   color: var(--ink); white-space: nowrap; }
 .brand svg { width: 22px; height: 22px; }
-.brand .ver { font: 600 .62rem var(--mono); color: var(--accent); border: 1px solid var(--accent);
-  border-radius: 5px; padding: 0 .3rem; }
 nav.tabs { display: flex; gap: .2rem; flex-wrap: wrap; }
 nav.tabs a { color: var(--mut); padding: .35rem .7rem; border-radius: 8px; font-size: .92rem;
   text-decoration: none; position: relative; }
@@ -477,3 +475,26 @@ table.ex-moves .z { color: var(--mut); }
 table.ex-moves th.grp { text-align: center; border-bottom: 1px solid var(--line); font-size: .7rem;
   text-transform: uppercase; letter-spacing: .06em; color: var(--mut); }
 .guide-link { font-size: .82em; white-space: nowrap; }
+
+/* --- extras: the world map ------------------------------------------------------- */
+.wm-wrap { position: relative; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); box-shadow: var(--shadow); padding: .6rem; }
+svg.wm { display: block; width: 100%; height: auto; }
+svg.wm path, svg.wm circle { fill: var(--panel-2); stroke: var(--line-2); stroke-width: .5; stroke-linejoin: round; }
+svg.wm .on { stroke: var(--panel); }
+svg.wm circle { stroke-width: 1.5; }
+svg.wm .on { cursor: pointer; }
+svg.wm circle.on { stroke: var(--panel); }
+svg.wm .hl { stroke: var(--ink); stroke-width: 1.2; }
+.wm-tip { position: absolute; z-index: 5; pointer-events: none; background: var(--panel); color: var(--ink);
+  border: 1px solid var(--line-2); border-radius: 8px; box-shadow: var(--shadow); padding: .45rem .65rem;
+  font-size: .84rem; line-height: 1.4; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.wm-tip .mut { color: var(--mut); }
+.wm-tip .wm-wdl { font-size: .72rem; }
+.wm-tip .wm-part { font-size: .78rem; color: var(--ink-2); }
+.wm-legend { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .9rem; margin: .6rem 0 1.2rem;
+  font-size: .8rem; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.wm-legend .lead { font-size: .66rem; text-transform: uppercase; letter-spacing: .08em; color: var(--mut); }
+.wm-key { display: inline-flex; align-items: center; gap: .35rem; }
+.wm-key i { width: 14px; height: 10px; border-radius: 2px; display: inline-block; }
+.wm-table tbody tr:hover td { background: var(--panel-2); }

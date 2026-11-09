@@ -6,7 +6,7 @@ accurately for forty moves a pawn down, or blunder once and still have been
 better for most of the game. This measures the positions instead: the win
 chance after every move, by both sides, averaged over the game — the share of
 it each side had, as possession and chances are in football. Shown as one card
-in "The game in numbers" (`review.summary`).
+in "Summary" (`review.summary`).
 
 Counting stops once the game is settled for good: at the first position from
 which one side's win chance stays at `SETTLED` or more to the end. Without that

@@ -150,7 +150,7 @@ def conversion_report(pairs, cp: int = 200) -> list[dict]:
     # version instead. phase_agg still feeds the Top-3 headline card above.)
     return [
         {"title": "Outcomes", "widgets": [cards]},
-        {"title": "Where games are decided", "widgets": [decided_note, decided_cards,
+        {"title": "Phase where games are decided", "widgets": [decided_note, decided_cards,
                                                           decided_table]},
         {"title": "Accuracy by the position you moved in",
          "widgets": [W.text("Your moves grouped by the evaluation before them. Blunders "
@@ -347,8 +347,8 @@ def advanced_report(pairs) -> list[dict]:
         f"Their mistakes you punished: when your opponent's move cost them "
         f"{MISTAKE:.0f}% win chance or more, how often your reply was the engine's "
         f"first choice. A mistake straight after a mistake: after a move of yours "
-        f"that was a mistake or a blunder, how often the next one was too — far "
-        f"above your rate on any move suggests one error unsettles you.")
+        f"that was a mistake or a blunder, how often the next one was too, beside "
+        f"your rate on any move.")
     return [{"title": "Punishing mistakes, and mistakes in a row", "widgets": [cards, notes]}]
 
 
@@ -461,8 +461,7 @@ def progress_report(pairs, cp: int = 200) -> list[dict]:
     ])
     note = W.text(
         f"Your last {len(usable) - cut} analysed games against your {cut} games "
-        f"before them. These are small samples, and no row here has a 95% range: "
-        f"treat a change as real only when it lasts as more games come in.")
+        f"before them. No row here has a 95% range.")
     return [{"title": "Progress check — recent vs baseline", "widgets": [
         head, note,
         W.table(["Metric", "Baseline", "Recent", "Change"], rows),

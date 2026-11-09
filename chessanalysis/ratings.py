@@ -28,10 +28,16 @@ where the refund arrived — a win worth 17 among wins worth 9, or a loss that
 cost nothing. Without opponent ratings only the second kind is visible: a loss
 whose change is >= 0 (or a win whose change is <= 0) is arithmetically
 impossible, so it can only be an adjustment. If no such game is found the
-refund hasn't landed yet and the correction runs to the end of the series.
+refund hasn't landed yet and the correction runs to the end of the series —
+but only for a while. Chess.com doesn't refund every game against a closed
+account, and a refund missing from games played `REFUND_DAYS` after the ban
+was first seen is not coming: that loss stands, uncorrected, exactly as
+Chess.com's own rating keeps it.
 """
 from __future__ import annotations
 
+import calendar
+import time
 from statistics import median
 
 # a result whose rating moved the wrong way (or not at all) can only be an
@@ -40,6 +46,16 @@ _WRONG_WAY = {"loss": lambda d: d >= 0, "win": lambda d: d <= 0}
 _SCORE = {"win": 1.0, "draw": 0.5, "loss": 0.0}
 _K_WINDOW = 5          # games either side whose K sets a game's expected change
 _MIN_SURPRISE = 0.15   # |score - expected| below this says too little about K
+REFUND_DAYS = 7        # refunds seen so far land within a day or two of the ban
+
+
+def _epoch(g) -> int:
+    """A game's end as unix time, 0 if unknown."""
+    try:
+        return calendar.timegm(time.strptime(getattr(g, "sort_key", ""),
+                                             "%Y.%m.%d %H:%M:%S"))
+    except ValueError:
+        return 0
 
 
 def _series(games):
@@ -102,12 +118,15 @@ def _refund_index(series, start, back, left):
     return None
 
 
-def corrections(games, cheated_ids) -> dict[str, int]:
+def corrections(games, cheated_ids, banned_at=None) -> dict[str, int]:
     """{game_id: points to add to that game's rating}, for cheated losses.
 
     `games` must be the full chronological history — the cheated games
     included, since the curve is only readable with every sample present.
+    `banned_at` is {game_id: unix time the ban was first seen}; without it a
+    refund that never shows up is assumed to be still on its way.
     """
+    banned_at = banned_at or {}
     fix: dict[str, int] = {}
     for series in _series(games).values():
         left = _residuals(series)
@@ -119,6 +138,9 @@ def corrections(games, cheated_ids) -> dict[str, int]:
                 continue                  # a win or draw: the gain is kept
             back = -lost
             end = _refund_index(series, i, back, left)
+            seen = banned_at.get(str(g.game_id))
+            if end is None and seen and _epoch(series[-1]) > seen + REFUND_DAYS * 86400:
+                continue                  # played on well past the ban: no refund
             # from the cheated game itself (the refund undoes its own drop too)
             # up to, but not including, the game the refund landed on — from
             # there the points are already back in the recorded rating
@@ -127,10 +149,10 @@ def corrections(games, cheated_ids) -> dict[str, int]:
     return fix
 
 
-def apply(games, cheated_ids) -> None:
+def apply(games, cheated_ids, banned_at=None) -> None:
     """Rebase `user_elo` in place over the whole history, keeping the rating as
     Chess.com recorded it in `user_elo_raw`."""
-    fix = corrections(games, cheated_ids)
+    fix = corrections(games, cheated_ids, banned_at)
     for g in games:
         g.user_elo_raw = g.user_elo
         if g.user_elo is not None:

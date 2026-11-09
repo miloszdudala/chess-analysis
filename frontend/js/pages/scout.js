@@ -4,8 +4,8 @@ import { esc, getJSON, spinner, who } from "../api.js";
 import { renderDoc } from "../widgets.js";
 import { mountExplorer } from "./openings.js";
 
-const KEY = "chess-analyzer:scouted";
-function recent() { try { return JSON.parse(localStorage.getItem(KEY) || "[]"); } catch (e) { return []; } }
+const KEY = "chess-analysis:scouted";
+function recent() { try { return JSON.parse(localStorage.getItem(KEY) || localStorage.getItem("chess-analyzer:scouted") || "[]"); } catch (e) { return []; } }
 function remember(name) {
   try {
     const list = [name, ...recent().filter((n) => n.toLowerCase() !== name.toLowerCase())].slice(0, 8);

@@ -14,18 +14,18 @@ cp .env.example .env                              # optional: a default username
 ```
 
 `.env` (gitignored) holds `CHESS_USERNAME`, `CHESS_DB`, `STOCKFISH_PATH`,
-`ENGINE_DEPTH`, `RECENT_DEPTH`, `CORPUS_WORKERS`, `DECISIVE_CP`.
+`ENGINE_DEPTH`, `BULLET_DEPTH`, `RECENT_DEPTH`, `CORPUS_WORKERS`, `DECISIVE_CP`.
 
 ## Run it
 
-Launch **Chess Analyzer** from the Dock, Launchpad or Spotlight, or
-double-click `Chess Analyzer.command` in this folder. Either restarts the server
+Launch **Chess Analysis** from the Dock, Launchpad or Spotlight, or
+double-click `Chess Analysis.command` in this folder. Either restarts the server
 and opens the browser, so code changes are always picked up.
 
 ```bash
-bin/chess-analyzer            # start (restarting any old server) and open the browser
-bin/chess-analyzer --stop     # stop it
-PORT=8080 bin/chess-analyzer  # another port
+bin/chess-analysis            # start (restarting any old server) and open the browser
+bin/chess-analysis --stop     # stop it
+PORT=8080 bin/chess-analysis  # another port
 .venv/bin/python webapp.py    # the long way: http://127.0.0.1:5050
 ```
 
@@ -37,7 +37,7 @@ A thin bar under the header shows its progress.
 
 > **First launch of the Dock app** asks for access to the Documents folder —
 > click **Allow**. If you miss it: `tccutil reset SystemPolicyDocumentsFolder
-> local.chessanalyzer.launcher` and launch again. The app bundle is a launcher
+> local.chessanalysis.launcher` and launch again. The app bundle is a launcher
 > only; rebuild it with `bin/make-app`.
 
 ## The pages
@@ -105,6 +105,11 @@ openings by name, how their games end, how they use the clock against players
 at their rating, and your games against them. Their repertoire opens in the
 explorer.
 
+**Extras** — lighter stats. A world map of the countries your opponents play for
+(from their Chess.com profiles, looked up during a sync), shaded by how many
+games, with your record against each when you point at it, and the same as a
+table. Rebuild the map shapes with `bin/make-worldmap` (instructions inside).
+
 ## The units
 
 One vocabulary on every page (`chessanalysis/glossary.py`, shown on the Guide):
@@ -152,10 +157,12 @@ beyond the ratings the corpus covers, rather than extrapolating.
 
 ## Phases
 
-Opening, middlegame and endgame follow Lichess's Divider
-(`chessanalysis/phases.py`), not the move number: the middlegame starts with
-development, a thinned back rank or interlocked armies; the endgame when six or
-fewer pieces besides kings and pawns remain. A move belongs to the phase of the
+Opening, middlegame and endgame follow the position
+(`chessanalysis/phases.py`), not the move number. As in Lichess's Divider, the
+middlegame starts with development, a thinned back rank or interlocked armies.
+The endgame starts when each side has at most 13 points of pieces left (knight
+or bishop 3, rook 5, queen 9), so queen, rook and minor piece each is still a
+middlegame. A move belongs to the phase of the
 position it was played from. Every statistic uses this one definition, except
 the opening tables, which measure a fixed stretch (moves 1–12) so every game is
 measured over the same number of moves.
@@ -203,7 +210,7 @@ frontend/
 chessanalysis/
 ├── store.py               data/chess.db — the one place anything is kept
 ├── model.py               PGN -> perspective-bound Game objects
-├── phases.py              opening / middlegame / endgame (Lichess's Divider)
+├── phases.py              opening / middlegame / endgame, by position
 ├── enrich/engine.py       Stockfish per-move evals, Lichess accuracy
 ├── livengine.py           one long-lived engine for interactive questions
 ├── jobs.py                background jobs with pollable progress

@@ -45,7 +45,7 @@ def headline(ctx):
                    label="What accuracy and centipawn loss are")]
 
 
-@metric("brackets", title="Where the gap is", order=20)
+@metric("brackets", title="Accuracy and blunders by phase", order=20)
 def by_phase(ctx):
     """Accuracy alone can hide the diagnosis — cleaner average play and more
     catastrophes net out to one number. Split by phase and by severity, they
@@ -65,9 +65,10 @@ def by_phase(ctx):
             f"theirs: positive means yours is higher.")
     if me["acc"] < co["acc"] and all(
             (me[k + "_acc"] or 0) >= (co[k + "_acc"] or 0) for k, _ in PHASES):
-        note += (" Note the shape here: your accuracy is higher in every phase "
-                 "yet lower overall. Game accuracy punishes catastrophes, and "
-                 "the blunder columns are where that shows.")
+        note += (" Your accuracy is higher in every phase and lower overall: a "
+                 "phase figure is the plain average of its moves' accuracy, while "
+                 "game accuracy (the Lichess method) is half a harmonic mean, which "
+                 "pulls toward a game's worst moves.")
     if me["dec_move"] and co["dec_move"]:
         note += (f" The evaluation first reaches ±2.00 around move "
                  f"{me['dec_move']:.0f} in your games and around move "

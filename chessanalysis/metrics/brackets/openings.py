@@ -146,8 +146,9 @@ def strength(ctx):
                     f"win chance in the opening than {ctx.who}, and the 95% range "
                     f"rules out chance.")
     elif g:
-        said.append(f"How much win chance you give away in the opening is within chance "
-                    f"of {ctx.who}.")
+        said.append(f"You give away {abs(g[0]):.1f}% {'less' if g[0] < 0 else 'more'} "
+                    f"win chance in the opening than {ctx.who}; the 95% range, "
+                    f"{g[0] - g[1]:+.1f}% to {g[0] + g[1]:+.1f}%, includes no difference.")
     n = _gap(mine, peers, "net_op")
     if n and abs(n[0]) > n[1]:
         said.append(f"Counting your opponents' moves too, you come out of the opening "
@@ -160,7 +161,7 @@ def strength(ctx):
     return out
 
 
-@metric("brackets", title="How varied your openings are", order=41)
+@metric("brackets", title="Opening variety", order=41)
 def repertoire(ctx):
     if ctx.scope != "peers" or not ctx.user:
         return None
@@ -259,7 +260,7 @@ def _by_opening(ctx, mine, corpus):
                      "Book moves", "Your score"], rows)]
 
 
-@metric("brackets", title="Does knowing more theory pay?", order=43)
+@metric("brackets", title="Theory and results", order=43)
 def worth(ctx):
     _, corpus = _records(ctx)
     pop = op.popularity(corpus)
@@ -342,7 +343,7 @@ def worth(ctx):
     return out
 
 
-@metric("brackets", title="The opening at each rating", order=41)
+@metric("brackets", title="Openings by rating", order=41)
 def by_band(ctx):
     if ctx.scope != "ladder" or not ctx.bands:
         return None

@@ -1,0 +1,175 @@
+#!/usr/bin/env python3
+"""Build frontend/js/worldmap.js — the World page's map — from Natural Earth.
+
+    curl -LO https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_50m_admin_0_countries.geojson
+    bin/make-worldmap ne_50m_admin_0_countries.geojson
+
+Countries are keyed by ISO 3166 alpha-2, the code Chess.com puts on a profile.
+The shapes are projected (Equal Earth) and simplified here, once, so the page
+draws plain SVG paths with no map library and no network. A country too small
+to point at gets a dot at its centre as well.
+"""
+from __future__ import annotations
+
+import json
+import math
+import os
+import sys
+
+WIDTH = 1000
+TOLERANCE = 0.7           # px: Douglas–Peucker simplification
+MIN_RING = 4.0            # px²: islands smaller than this are dropped...
+TINY = 6.0                # px: ...and a country narrower than this gets a dot
+# Natural Earth pieces without an ISO code of their own, folded into the
+# country Chess.com would file them under.
+FOLD = {"Somaliland": "SO", "N. Cyprus": "CY"}
+SKIP = {"AQ", "-99"}
+# Natural Earth draws borders as controlled on the ground; these are drawn as
+# recognised instead: (from, to, lon/lat box wholly containing the territory).
+RECOGNISED = [("RU", "UA", (32.3, 44.2, 36.8, 46.3))]   # Crimea is Ukraine
+
+A1, A2, A3, A4 = 1.340264, -0.081106, 0.000893, 0.003796
+M = math.sqrt(3) / 2
+X_MAX, Y_MAX = 2.7064, 1.3173
+SCALE = WIDTH / (2 * X_MAX)
+
+
+def project(lon, lat):
+    """Equal Earth (Šavrič, Patterson & Jenny 2018), in pixels."""
+    lam, phi = math.radians(lon), math.radians(lat)
+    t = math.asin(M * math.sin(phi))
+    t2, t6 = t * t, t ** 6
+    x = lam * math.cos(t) / (M * (A1 + 3 * A2 * t2 + t6 * (7 * A3 + 9 * A4 * t2)))
+    y = t * (A1 + A2 * t2 + t6 * (A3 + A4 * t2))
+    return (x + X_MAX) * SCALE, (Y_MAX - y) * SCALE
+
+
+def simplify(pts, tol):
+    """Douglas–Peucker over a closed ring, split at the point farthest from the
+    start so neither half's chord has zero length."""
+    if len(pts) < 5:
+        return pts
+    far = max(range(len(pts)), key=lambda i: math.dist(pts[0], pts[i]))
+    return _dp(pts[:far + 1], tol)[:-1] + _dp(pts[far:], tol)
+
+
+def _dp(pts, tol):
+    if len(pts) < 3:
+        return pts
+    keep = [False] * len(pts)
+    keep[0] = keep[-1] = True
+    stack = [(0, len(pts) - 1)]
+    while stack:
+        a, b = stack.pop()
+        (ax, ay), (bx, by) = pts[a], pts[b]
+        dx, dy = bx - ax, by - ay
+        norm = math.hypot(dx, dy) or 1e-9
+        best, idx = 0.0, -1
+        for i in range(a + 1, b):
+            px, py = pts[i]
+            d = abs(dy * (px - ax) - dx * (py - ay)) / norm
+            if d > best:
+                best, idx = d, i
+        if best > tol:
+            keep[idx] = True
+            stack += [(a, idx), (idx, b)]
+    return [p for p, k in zip(pts, keep) if k]
+
+
+def area(pts):
+    return abs(sum(x0 * y1 - x1 * y0 for (x0, y0), (x1, y1) in zip(pts, pts[1:] + pts[:1]))) / 2
+
+
+def rings_of(geom):
+    polys = geom["coordinates"] if geom["type"] == "MultiPolygon" else [geom["coordinates"]]
+    return [ring for poly in polys for ring in poly]
+
+
+def inside(ring, box):
+    lo0, la0, lo1, la1 = box
+    return all(lo0 < lon < lo1 and la0 < lat < la1 for lon, lat in ring)
+
+
+def annex(rings, piece):
+    """Join `piece` onto the ring it shares a border with, so no seam is drawn
+    between them; append it as a ring of its own if it shares none.
+
+    Natural Earth's neighbours share vertices along a common border, so the
+    border is a run of points in both rings, traversed in opposite directions:
+    the merged ring follows the host up to the run, goes round the piece's
+    outer side, and rejoins the host where the run ends."""
+    piece = piece[:-1]                                    # GeoJSON rings repeat the first point
+    for n, host in enumerate(rings):
+        shared = set(piece) & set(host)
+        run = [i for i, q in enumerate(host) if q in shared]
+        if len(run) < 2 or run != list(range(run[0], run[-1] + 1)):
+            continue                                      # no single contiguous border here
+        a, b = run[0], run[-1]
+        j = piece.index(host[a])
+        step = 1 if piece[(j + 1) % len(piece)] not in shared else -1
+        outer = []
+        j = (j + step) % len(piece)
+        while piece[j] != host[b]:
+            outer.append(piece[j])
+            j = (j + step) % len(piece)
+        rings[n] = host[:a + 1] + outer + host[b:]
+        return
+    rings.append(piece + piece[:1])
+
+
+def main(path):
+    with open(path, encoding="utf-8") as f:
+        features = json.load(f)["features"]
+    shapes: dict[str, dict] = {}
+    for feat in features:
+        p = feat["properties"]
+        code = FOLD.get(p["NAME"]) or p.get("ISO_A2_EH") or p["ISO_A2"]
+        if code in SKIP:
+            continue
+        entry = shapes.setdefault(code, {"name": None, "rings": []})
+        # Several features can share a code (Australia's outlying territories carry
+        # AU); the name is the one whose own ISO code it is.
+        if entry["name"] is None and p["NAME"] not in FOLD or p["ISO_A2"] == code:
+            entry["name"] = p["NAME"]
+        entry["rings"] += [[tuple(q) for q in ring] for ring in rings_of(feat["geometry"])]
+    for src, dst, box in RECOGNISED:
+        pieces = [r for r in shapes[src]["rings"] if inside(r, box)]
+        shapes[src]["rings"] = [r for r in shapes[src]["rings"] if not inside(r, box)]
+        for piece in pieces:
+            annex(shapes[dst]["rings"], piece)
+    for entry in shapes.values():
+        entry["rings"] = [[project(lon, lat) for lon, lat in ring] for ring in entry["rings"]]
+
+    out = {}
+    top, bottom = float("inf"), 0.0
+    for code, entry in sorted(shapes.items()):
+        rings = sorted(entry["rings"], key=area, reverse=True)
+        kept = []
+        for i, ring in enumerate(rings):
+            s = simplify(ring, TOLERANCE)
+            if i and (len(s) < 4 or area(s) < MIN_RING):
+                continue
+            kept.append(s if len(s) >= 4 else ring)
+        for r in kept:
+            top = min(top, min(y for _, y in r))
+            bottom = max(bottom, max(y for _, y in r))
+        d = "".join("M" + "L".join(f"{x:.1f},{y:.1f}" for x, y in r) + "Z" for r in kept)
+        xs = [x for x, _ in rings[0]]
+        ys = [y for _, y in rings[0]]
+        item = {"name": entry["name"], "d": d}
+        if max(max(xs) - min(xs), max(ys) - min(ys)) < TINY:
+            item["dot"] = [round(sum(xs) / len(xs), 1), round(sum(ys) / len(ys), 1)]
+        out[code] = item
+
+    top, bottom = math.floor(top) - 4, math.ceil(bottom) + 4     # crop to the land, Antarctica gone
+    target = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "frontend", "js", "worldmap.js")
+    with open(target, "w", encoding="utf-8") as f:
+        f.write("// Generated by bin/make-worldmap from Natural Earth 1:50m (public domain).\n"
+                "// Equal Earth projection; keys are ISO 3166 alpha-2. Do not edit by hand.\n")
+        f.write(f"export const VIEWBOX = [0, {top}, {WIDTH}, {bottom - top}];\n")
+        f.write("export const COUNTRIES = " + json.dumps(out, separators=(",", ":"), ensure_ascii=False) + ";\n")
+    print(f"{len(out)} countries, {os.path.getsize(target) // 1024} KB -> {os.path.normpath(target)}")
+
+
+if __name__ == "__main__":
+    main(sys.argv[1])

@@ -79,7 +79,7 @@ def _your_record(mine, opening_moves: tuple, your_color: str):
     return _wdl(out)
 
 
-@metric("scout", title="What they play", order=20)
+@metric("scout", title="First moves", order=20)
 def repertoire(ctx):
     games = ctx.games
     if not games:
@@ -121,7 +121,7 @@ def repertoire(ctx):
     return widgets or None
 
 
-@metric("scout", title="Their openings by name", order=22)
+@metric("scout", title="Openings", order=22)
 def families(ctx):
     from ... import explorer
 
@@ -162,7 +162,7 @@ def _ending(g):
 SHORT_GAME = 25       # moves: a loss inside this is an early collapse
 
 
-@metric("scout", title="How their games end", order=30)
+@metric("scout", title="Endings", order=30)
 def endings(ctx):
     if not ctx.games:
         return None
@@ -199,7 +199,7 @@ def _clock_stats(games, color_of):
     return n, tt, end
 
 
-@metric("scout", title="The clock", order=35)
+@metric("scout", title="Clock", order=35)
 def clock(ctx):
     games = ctx.games
     n, tt, end = _clock_stats(games, lambda g: g.color)

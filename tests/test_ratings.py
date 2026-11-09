@@ -133,3 +133,27 @@ def test_games_without_a_rating_are_skipped():
     games.insert(1, FakeGame("unrated", None, "win"))
     ratings.apply(games, {"g1"})
     assert games[1].user_elo is None
+
+
+# --- a refund that never comes ----------------------------------------------
+# Chess.com doesn't refund every game against a closed account. Once games
+# played well after the ban still show no refund, the loss stands.
+
+def _dated(games, start_day):
+    for i, g in enumerate(games):
+        g.sort_key = f"2026.10.{start_day + i:02d} 12:00:00"
+    return games
+
+
+NO_REFUND = [(2055, "draw"), (2050, "loss"), (2058, "win"), (2053, "loss"),
+             (2061, "win"), (2056, "loss"), (2064, "win")]
+
+
+def test_missing_refund_long_after_the_ban_is_not_corrected():
+    games = _dated(series(*NO_REFUND), 1)
+    seen = ratings._epoch(games[1])               # ban seen the day after the game
+    ratings.apply(games, {"g1"}, {"g1": seen})    # last game is 5 days later...
+    assert elos(games)[-1] == 2069                # ...so still waiting: corrected
+    games = _dated(series(*NO_REFUND), 1)
+    ratings.apply(games, {"g1"}, {"g1": seen - 3 * 86400})   # 8 days: gave up
+    assert elos(games) == [e for e, _ in NO_REFUND]

@@ -1,26 +1,31 @@
 """Opening / middlegame / endgame: the one definition every statistic uses.
 
-The split follows Lichess's `Divider` (scalachess, `chess/Divider.scala`) — the
-same source the accuracy formula in `enrich.engine` is ported from — rather
-than a move number:
+The split follows the position rather than a move number. The middlegame and
+the overall structure come from Lichess's `Divider` (scalachess,
+`chess/Divider.scala`) — the same source the accuracy formula in `enrich.engine`
+is ported from. The endgame test does not:
 
 * the **middlegame** begins at the first position where the minor and major
   pieces left on the board number 10 or fewer, or either side's back rank holds
   fewer than four of its own pieces (development), or the two armies are
   "mixed" — interlocked across 2x2 regions of the board — past a score of 150;
-* the **endgame** begins at the first position with 6 or fewer minor and major
-  pieces left;
+* the **endgame** begins at the first position where each side has at most 13
+  points of pieces (knight or bishop 3, rook 5, queen 9; Speelman's definition);
 * a game that never satisfies the middlegame test has no endgame either, and a
   middlegame that would begin no earlier than the endgame is dropped.
 
-A move belongs to the phase of the position it was played *from*: the move that
-trades the last queen off is a middlegame move, and the reply to it is the
-first endgame move.
+Lichess's endgame test counts pieces, six or fewer: queen, rook and minor piece
+each passes it, and that is still a middlegame. Counting material leaves that
+position in the middlegame while keeping rook-and-minor-piece endings.
 
-Why not "moves 1–12 / 13–32 / 33+": 71% of the corpus never reaches a material
-endgame, yet every move past 32 of every one of those games was counted as
-endgame play, and 37% of the games that do reach one start it more than eight
-moves away from move 33. Positions, not move counts, are what make a phase.
+A move belongs to the phase of the position it was played *from*: the move that
+makes the trade completing the endgame is a middlegame move, and the reply to
+it is the first endgame move.
+
+Why not "moves 1–12 / 13–32 / 33+": many games never reach an endgame, yet every
+move past 32 of every one of those games was counted as endgame play, and the
+games that do reach one start it far from any fixed move. Positions, not move
+counts, are what make a phase.
 """
 from __future__ import annotations
 
@@ -35,6 +40,8 @@ KEYS = {OPENING: "op", MIDDLEGAME: "mg", ENDGAME: "eg"}
 _REGIONS = [0x0303 << (x + 8 * y) for y in range(7) for x in range(7)]
 _RANK1 = chess.BB_RANK_1
 _RANK8 = chess.BB_RANK_8
+ENDGAME_MATERIAL = 13     # pieces each side may keep, in points, in an endgame
+_PIECE_POINTS = ((chess.KNIGHT, 3), (chess.BISHOP, 3), (chess.ROOK, 5), (chess.QUEEN, 9))
 
 
 def _count(bb: int) -> int:
@@ -102,8 +109,14 @@ def is_middlegame(board: chess.Board) -> bool:
             or _mixedness(board) > 150)
 
 
+def _piece_points(board: chess.Board, color: chess.Color) -> int:
+    return sum(points * _count(board.pieces_mask(piece, color))
+               for piece, points in _PIECE_POINTS)
+
+
 def is_endgame(board: chess.Board) -> bool:
-    return _majors_and_minors(board) <= 6
+    return (_piece_points(board, chess.WHITE) <= ENDGAME_MATERIAL
+            and _piece_points(board, chess.BLACK) <= ENDGAME_MATERIAL)
 
 
 @dataclass(frozen=True)

@@ -1,10 +1,10 @@
 #!/bin/bash
-# Start chess-analyzer and open it in the browser — no terminal needed.
+# Start chess-analysis and open it in the browser — no terminal needed.
 #
-#   bin/chess-analyzer          start (restarting any old server) and open
-#   bin/chess-analyzer --stop   stop the server
+#   bin/chess-analysis          start (restarting any old server) and open
+#   bin/chess-analysis --stop   stop the server
 #
-# Double-clicking "Chess Analyzer" in the Dock/Applications runs this. Each
+# Double-clicking "Chess Analysis" in the Dock/Applications runs this. Each
 # launch restarts the server, so edits to the code are always picked up.
 set -u
 
@@ -19,7 +19,7 @@ die() {
     if [ -t 2 ]; then
         printf '%s\n' "$1" >&2
     else
-        osascript -e "display alert \"Chess Analyzer\" message \"$1\" as critical" >/dev/null 2>&1
+        osascript -e "display alert \"Chess Analysis\" message \"$1\" as critical" >/dev/null 2>&1
     fi
     exit 1
 }

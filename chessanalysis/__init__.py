@@ -3,7 +3,7 @@
 Layers:
   * store.py        one SQLite file: games, engine analyses, corpus, training
   * model.py        PGN -> perspective-bound Game objects (+ parsed moves/clocks)
-  * phases.py       the opening / middlegame / endgame split (Lichess's Divider)
+  * phases.py       the opening / middlegame / endgame split, by position
   * enrich/         Stockfish per-move analysis, kept in the store
   * contexts.py     per-mode input shapes (PlayerContext, GameContext, ...)
   * registry.py     @metric decorator; metrics self-register, tagged by scope

@@ -1,4 +1,4 @@
-# Chess Analyzer 2.0
+# Chess Analysis
 
 Your Chess.com games, analysed by Stockfish and read three ways: **what is
 true** about your play compared with players at your rating, measured on equal

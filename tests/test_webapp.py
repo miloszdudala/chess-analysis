@@ -22,11 +22,13 @@ def test_config_endpoint(client):
 
 
 def test_games_endpoint_returns_list(client):
-    r = client.get("/api/games")
+    # an account is required; with no .env (a fresh clone) use one with no games
+    user = webapp.config.get("CHESS_USERNAME") or "no-games-here"
+    r = client.get(f"/api/games?user={user}")
     assert r.status_code == 200
     games = r.get_json()
     assert isinstance(games, list)
-    if games:                                   # depends on local PGN library
+    if games:                                   # depends on the local database
         g = games[0]
         for key in ("id", "white", "black", "result", "outcome", "time_class"):
             assert key in g

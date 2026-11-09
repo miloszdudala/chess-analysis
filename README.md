@@ -16,6 +16,18 @@ cp .env.example .env                              # optional: a default username
 `.env` (gitignored) holds `CHESS_USERNAME`, `CHESS_DB`, `STOCKFISH_PATH`,
 `ENGINE_DEPTH`, `BULLET_DEPTH`, `RECENT_DEPTH`, `CORPUS_WORKERS`, `DECISIVE_CP`.
 
+Not on a Mac: install Stockfish from stockfishchess.org or your package manager,
+put its path in `STOCKFISH_PATH` if it is not on `PATH`, and start the app with
+`python webapp.py`. The launchers in `bin/` and the Dock app are macOS only.
+
+No data is needed up front. Your games are downloaded from Chess.com when you
+enter your account (a couple of minutes for a few hundred games); the opening
+names and the strong-player opening book ship with the code. Two things fill
+up over time: the engine pass over your games runs in the background (about
+half a minute a game, so a few hours for a few hundred games), and Peers and
+Brackets stay empty until you press **⊕ Expand the corpus**, which downloads
+and analyses other players' games near your rating.
+
 ## Run it
 
 Launch **Chess Analysis** from the Dock, Launchpad or Spotlight, or

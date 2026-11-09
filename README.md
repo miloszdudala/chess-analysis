@@ -1,7 +1,7 @@
 # Chess Analysis
 
 This is a personal chess analysis webpage, giving insights to explore much beyond what is shown for free accounts. 
-All code is AI-written while I state what I want to see and explain methods to derive the more complicated statistics.
+All code is AI-written while almost all ideas are mine and I explain methods to derive the more complicated statistics.
 
 ## Setup
 
